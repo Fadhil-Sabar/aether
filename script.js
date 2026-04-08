@@ -31,6 +31,7 @@ $(document).ready(function () {
   const $topPInput = $("#top-p-input");
   const $topKInput = $("#top-k-input");
   const $showMetricsToggle = $("#show-metrics-toggle");
+  const $toolsEnabledToggle = $("#tools-enabled-toggle");
   const $webSearchToggle = $("#web-search-toggle");
   const $jinaApiKeyInput = $("#jina-api-key");
 
@@ -51,6 +52,7 @@ $(document).ready(function () {
 
   // Config State
   let showMetrics = localStorage.getItem("ollama_show_metrics") === "true";
+  let toolsEnabled = localStorage.getItem("ollama_tools_enabled") !== "false"; // Default to true
   let webSearchEnabled = localStorage.getItem("ollama_web_search") === "true";
   let jinaApiKey = localStorage.getItem("ollama_jina_key") || "";
 
@@ -106,6 +108,7 @@ $(document).ready(function () {
   }
 
   function updateThinkUIVisibility() {
+    return $thinkConfig.removeClass("hidden").addClass("flex");
     const model = $modelSelect.val() || "";
     const isThinkModel = thinkModels.some((m) =>
       model.toLowerCase().includes(m),
@@ -552,6 +555,7 @@ $(document).ready(function () {
     $topPInput.val(configParams.top_p);
     $topKInput.val(configParams.top_k);
     $showMetricsToggle.prop("checked", showMetrics);
+    $toolsEnabledToggle.prop("checked", toolsEnabled);
     $webSearchToggle.prop("checked", webSearchEnabled);
     $jinaApiKeyInput.val(jinaApiKey);
   }
@@ -562,6 +566,7 @@ $(document).ready(function () {
 
   $saveSettings.on("click", () => {
     showMetrics = $showMetricsToggle.is(":checked");
+    toolsEnabled = $toolsEnabledToggle.is(":checked");
     webSearchEnabled = $webSearchToggle.is(":checked");
     jinaApiKey = $jinaApiKeyInput.val().trim();
 
@@ -572,6 +577,7 @@ $(document).ready(function () {
       top_k: parseInt($topKInput.val())
     };
     localStorage.setItem("ollama_show_metrics", showMetrics);
+    localStorage.setItem("ollama_tools_enabled", toolsEnabled);
     localStorage.setItem("ollama_web_search", webSearchEnabled);
     localStorage.setItem("ollama_jina_key", jinaApiKey);
     localStorage.setItem("ollama_config_params", JSON.stringify(configParams));
@@ -644,44 +650,47 @@ $(document).ready(function () {
     $userInput.prop("disabled", true);
     $sendBtn.prop("disabled", true).addClass("opacity-50");
 
-    const tools = [
-      {
-        type: "function",
-        function: {
-          name: "process_link",
-          description: "Fetch and process content from a URL to get its information",
-          parameters: {
-            type: "object",
-            properties: {
-              url: {
-                type: "string",
-                description: "The URL to fetch content from"
-              }
-            },
-            required: ["url"]
+    let tools = undefined;
+    if (toolsEnabled) {
+      tools = [
+        {
+          type: "function",
+          function: {
+            name: "process_link",
+            description: "Fetch and process content from a URL to get its information",
+            parameters: {
+              type: "object",
+              properties: {
+                url: {
+                  type: "string",
+                  description: "The URL to fetch content from"
+                }
+              },
+              required: ["url"]
+            }
           }
         }
-      }
-    ];
+      ];
 
-    if (webSearchEnabled) {
-      tools.push({
-        type: "function",
-        function: {
-          name: "web_search",
-          description: "Search the web to find up-to-date information on a specific topic",
-          parameters: {
-            type: "object",
-            properties: {
-              query: {
-                type: "string",
-                description: "The search query to look for"
-              }
-            },
-            required: ["query"]
+      if (webSearchEnabled) {
+        tools.push({
+          type: "function",
+          function: {
+            name: "web_search",
+            description: "Search the web to find up-to-date information on a specific topic",
+            parameters: {
+              type: "object",
+              properties: {
+                query: {
+                  type: "string",
+                  description: "The search query to look for"
+                }
+              },
+              required: ["query"]
+            }
           }
-        }
-      });
+        });
+      }
     }
 
     const botMsgId = appendMessageUI(
