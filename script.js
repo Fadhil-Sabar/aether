@@ -34,6 +34,16 @@ $(document).ready(function () {
   const $toolsEnabledToggle = $("#tools-enabled-toggle");
   const $webSearchToggle = $("#web-search-toggle");
   const $jinaApiKeyInput = $("#jina-api-key");
+  const $providerJina = $("#provider-jina");
+  const $providerSearxng = $("#provider-searxng");
+  const $searxngUrlInput = $("#searxng-url");
+  const $exportBtn = $("#export-chat-btn");
+  const $importBtn = $("#import-chat-btn");
+  const $importFileInput = $("#import-file-input");
+  const $sysPromptModal = $("#system-prompt-modal");
+  const $sysPromptInput = $("#system-prompt-input");
+  const $saveSysPrompt = $("#save-system-prompt");
+  const $closeSysPrompt = $("#close-system-prompt");
 
   const OLLAMA_BASE_URL = "http://localhost:11434";
 
@@ -55,6 +65,9 @@ $(document).ready(function () {
   let toolsEnabled = localStorage.getItem("ollama_tools_enabled") !== "false"; // Default to true
   let webSearchEnabled = localStorage.getItem("ollama_web_search") === "true";
   let jinaApiKey = localStorage.getItem("ollama_jina_key") || "";
+  let searchProvider = localStorage.getItem("ollama_search_provider") || "jina";
+  let searxngUrl = localStorage.getItem("ollama_searxng_url") || "http://172.17.0.1:8080";
+  let customSystemPrompt = localStorage.getItem("ollama_system_prompt") || "You are a professional AI assistant. Don't use emoji. Aim for clarity and depth. If a document is provided, use it as your primary source.";
 
   let configParams = JSON.parse(localStorage.getItem("ollama_config_params")) || {
     temperature: 0.7,
@@ -108,7 +121,6 @@ $(document).ready(function () {
   }
 
   function updateThinkUIVisibility() {
-    return $thinkConfig.removeClass("hidden").addClass("flex");
     const model = $modelSelect.val() || "";
     const isThinkModel = thinkModels.some((m) =>
       model.toLowerCase().includes(m),
@@ -143,7 +155,7 @@ $(document).ready(function () {
       addContext("link", url, content);
     } catch (error) {
       console.error("Link analysis failed:", error);
-      alert("Could not analyze the link. Make sure it's valid.");
+      showToast("Could not analyze the link. Make sure it's valid.", "error");
     }
   }
 
@@ -177,6 +189,35 @@ $(document).ready(function () {
     } catch (error) {
       console.error("Web search failed:", error);
       return `Error: Web search for "${query}" failed.`;
+    }
+  }
+
+  async function fetchSearxngContent(query) {
+    const url = searxngUrl.replace(/\/+$/, "") + "/search";
+    try {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: "q=" + encodeURIComponent(query) + "&format=json&language=en&categories=general"
+      });
+      if (!response.ok) throw new Error("SearXNG search failed: " + response.status);
+      const data = await response.json();
+      let result = "";
+      if (data.answers && data.answers.length > 0) {
+        result += "Answers:\n" + data.answers.join("\n") + "\n\n";
+      }
+      if (data.results && data.results.length > 0) {
+        data.results.forEach(function(r, i) {
+          result += "[" + (i+1) + "] Title: " + (r.title || "Untitled") + "\n";
+          result += "   URL Source: " + (r.url || "") + "\n";
+          result += "   Description: " + (r.content || "") + "\n\n";
+        });
+      }
+      if (!result.trim()) result = "No results found for: " + query;
+      return result;
+    } catch (error) {
+      console.error("SearXNG search failed:", error);
+      return "Error: SearXNG search for \"" + query + "\" failed. Make sure SearXNG is running at " + searxngUrl;
     }
   }
 
@@ -322,6 +363,10 @@ $(document).ready(function () {
                     <div class="status-indicator-zone"></div>
                     <div class="references-zone"></div>
                     <div class="metrics-zone"></div>
+                    <div class="msg-actions flex gap-2 mt-2 opacity-0 msg-actions-visible transition-opacity">
+                        <button class="edit-msg text-[0.55rem] font-bold uppercase tracking-widest text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors px-2 py-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800" data-msg-id="${id}">Edit</button>
+                        <button class="delete-msg text-[0.55rem] font-bold uppercase tracking-widest text-zinc-400 hover:text-red-500 transition-colors px-2 py-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800" data-msg-id="${id}">Delete</button>
+                    </div>
                 </div>
                 ${!isUser ? "" : `<div class="mt-2 text-[10px] text-zinc-400 font-bold uppercase tracking-widest px-1 opacity-60 italic">Personal Transmission</div>`}
             </div>
@@ -534,6 +579,62 @@ $(document).ready(function () {
     });
   });
 
+  // --- Message Edit / Delete ---
+  $chatArea.on("click", ".delete-msg", function () {
+    const msgId = $(this).data("msg-id");
+    if (!currentChatId) return;
+    const chat = chats.find(function(c) { return c.id === currentChatId; });
+    if (!chat) return;
+    // Find the message element index
+    const $bubble = $("#" + msgId);
+    const index = $bubble.index() - 1; // Account for welcome screen
+    // Actually, find by iterating
+    let msgIndex = -1;
+    $bubble.siblings(".message-bubble").each(function(i) {
+      if ($(this).attr("id") === msgId) msgIndex = i;
+    });
+    if (msgIndex < 0) {
+      // Find by position: it's the first matching element
+      const allBubbles = $chatArea.find(".message-bubble");
+      allBubbles.each(function(i) {
+        if ($(this).attr("id") === msgId) msgIndex = i;
+      });
+    }
+    if (msgIndex >= 0 && msgIndex < chat.messages.length) {
+      chat.messages.splice(msgIndex, 1);
+      saveChats();
+      $bubble.remove();
+      showToast("Message deleted", "info");
+      if (chat.messages.length === 0) $welcomeScreen.show();
+    }
+  });
+
+  $chatArea.on("click", ".edit-msg", function () {
+    const msgId = $(this).data("msg-id");
+    if (!currentChatId) return;
+    const chat = chats.find(function(c) { return c.id === currentChatId; });
+    if (!chat) return;
+    // Find message index
+    let msgIndex = -1;
+    const allBubbles = $chatArea.find(".message-bubble");
+    allBubbles.each(function(i) {
+      if ($(this).attr("id") === msgId) msgIndex = i;
+    });
+    if (msgIndex < 0 || msgIndex >= chat.messages.length) return;
+    const msg = chat.messages[msgIndex];
+    if (!msg.isUser) {
+      showToast("Only user messages can be edited", "warning");
+      return;
+    }
+    // Put the message text in the input field for editing
+    $userInput.val(msg.text).trigger("input").focus();
+    // Remove the old message
+    chat.messages.splice(msgIndex, 1);
+    saveChats();
+    $("#" + msgId).remove();
+    showToast("Edit your message and send", "info");
+  });
+
   // --- Theme Control ---
   $themeToggle.on("click", function () {
     $("html").toggleClass("dark");
@@ -558,6 +659,10 @@ $(document).ready(function () {
     $toolsEnabledToggle.prop("checked", toolsEnabled);
     $webSearchToggle.prop("checked", webSearchEnabled);
     $jinaApiKeyInput.val(jinaApiKey);
+    if (searchProvider === "jina") $providerJina.prop("checked", true);
+    else $providerSearxng.prop("checked", true);
+    $searxngUrlInput.val(searxngUrl);
+    $sysPromptInput.val(customSystemPrompt);
   }
 
   // --- UI Event Handlers ---
@@ -569,6 +674,8 @@ $(document).ready(function () {
     toolsEnabled = $toolsEnabledToggle.is(":checked");
     webSearchEnabled = $webSearchToggle.is(":checked");
     jinaApiKey = $jinaApiKeyInput.val().trim();
+    searchProvider = $providerSearxng.is(":checked") ? "searxng" : "jina";
+    searxngUrl = $searxngUrlInput.val().trim() || "http://172.17.0.1:8080";
 
     configParams = {
       temperature: parseFloat($tempInput.val()),
@@ -580,6 +687,8 @@ $(document).ready(function () {
     localStorage.setItem("ollama_tools_enabled", toolsEnabled);
     localStorage.setItem("ollama_web_search", webSearchEnabled);
     localStorage.setItem("ollama_jina_key", jinaApiKey);
+    localStorage.setItem("ollama_search_provider", searchProvider);
+    localStorage.setItem("ollama_searxng_url", searxngUrl);
     localStorage.setItem("ollama_config_params", JSON.stringify(configParams));
     if (currentChatId) loadChat(currentChatId);
     $settingsModal.addClass("hidden").removeClass("flex");
@@ -595,6 +704,98 @@ $(document).ready(function () {
   $closeRefModal.on("click", () => $refModal.addClass("hidden").removeClass("flex"));
   $refModal.on("click", function(e) {
     if (e.target === this) $(this).addClass("hidden").removeClass("flex");
+  });
+
+  // --- Toast System ---
+  function showToast(message, type) {
+    type = type || "info";
+    var icons = { info: "", success: "", error: "", warning: "" };
+    var colors = {
+      info: "border-l-zinc-500 bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300",
+      success: "border-l-emerald-500 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300",
+      error: "border-l-red-500 bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300",
+      warning: "border-l-amber-500 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300"
+    };
+    var toast = document.createElement("div");
+    toast.className = "toast pointer-events-auto animate-in slide-in-from-right-4 fade-in duration-300 fill-mode-forwards border-l-4 rounded-lg px-4 py-3 text-xs font-bold shadow-lg " + (colors[type] || colors.info);
+    toast.textContent = message;
+    var container = document.getElementById("toast-container");
+    container.appendChild(toast);
+    setTimeout(function() { toast.classList.add("opacity-0", "transition-opacity", "duration-300"); setTimeout(function() { toast.remove(); }, 300); }, 3500);
+  }
+
+  // --- System Prompt Modal ---
+  $settingsBtn.on("click", function() {
+    $sysPromptInput.val(customSystemPrompt);
+    // Already handled below for settings modal
+  });
+
+  $closeSysPrompt.on("click", function() {
+    $sysPromptModal.addClass("hidden").removeClass("flex");
+  });
+
+  $sysPromptModal.on("click", function(e) {
+    if (e.target === this) $(this).addClass("hidden").removeClass("flex");
+  });
+
+  // Long-press on header to edit system prompt
+  $currentChatTitle.parent().parent().on("dblclick", function() {
+    $sysPromptInput.val(customSystemPrompt);
+    $sysPromptModal.removeClass("hidden").addClass("flex");
+  });
+
+  $saveSysPrompt.on("click", function() {
+    var newPrompt = $sysPromptInput.val().trim();
+    if (newPrompt) {
+      customSystemPrompt = newPrompt;
+      localStorage.setItem("ollama_system_prompt", customSystemPrompt);
+      showToast("System prompt updated", "success");
+    }
+    $sysPromptModal.addClass("hidden").removeClass("flex");
+  });
+
+  // --- Export / Import ---
+  $exportBtn.on("click", function() {
+    if (chats.length === 0) { showToast("No chats to export", "warning"); return; }
+    var exportData = JSON.stringify({ version: "1.4.0", exportedAt: new Date().toISOString(), chats: chats }, null, 2);
+    var blob = new Blob([exportData], { type: "application/json" });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url;
+    a.download = "ollama-chats-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast("Exported " + chats.length + " chat(s)", "success");
+  });
+
+  $importBtn.on("click", function() {
+    $importFileInput.click();
+  });
+
+  $importFileInput.on("change", function(e) {
+    var file = e.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+      try {
+        var data = JSON.parse(e.target.result);
+        if (!data.chats || !Array.isArray(data.chats)) throw new Error("Invalid format");
+        // Merge: add imported chats, avoid duplicates by id
+        var existingIds = new Set(chats.map(function(c) { return c.id; }));
+        var imported = data.chats.filter(function(c) { return !existingIds.has(c.id); });
+        if (imported.length === 0) { showToast("All chats already exist", "warning"); return; }
+        chats = imported.concat(chats);
+        saveChats();
+        renderChatList();
+        showToast("Imported " + imported.length + " chat(s)", "success");
+      } catch (err) {
+        showToast("Import failed: " + err.message, "error");
+      }
+    };
+    reader.readAsText(file);
+    $importFileInput.val("");
   });
 
   // --- Main Logics ---
@@ -619,8 +820,7 @@ $(document).ready(function () {
       thinkValue = level === "true" ? true : level;
     }
     const messages = [];
-    const systemPrompt = "You are a professional AI assistant. Don't use emoji. Aim for clarity and depth. If a document is provided, use it as your primary source.";
-    messages.push({ role: "system", content: systemPrompt });
+    messages.push({ role: "system", content: customSystemPrompt });
     const historyLimit = 10;
     const recentHistory = chat.messages.slice(-historyLimit);
     recentHistory.forEach((m) => {
@@ -650,9 +850,9 @@ $(document).ready(function () {
     $userInput.prop("disabled", true);
     $sendBtn.prop("disabled", true).addClass("opacity-50");
 
-    let tools = undefined;
+    let baseTools = undefined;
     if (toolsEnabled) {
-      tools = [
+      baseTools = [
         {
           type: "function",
           function: {
@@ -673,7 +873,7 @@ $(document).ready(function () {
       ];
 
       if (webSearchEnabled) {
-        tools.push({
+        baseTools.push({
           type: "function",
           function: {
             name: "web_search",
@@ -768,7 +968,7 @@ $(document).ready(function () {
           body: JSON.stringify({
             model: selectedModel,
             messages: messages,
-            tools: tools,
+            tools: baseTools ? JSON.parse(JSON.stringify(baseTools)) : undefined,
             think: thinkValue,
             stream: true,
             options: {
@@ -855,17 +1055,19 @@ $(document).ready(function () {
               addContext("link", url, content);
             } else if (tc.function.name === "web_search") {
                                 const query = tc.function.arguments.query;
+                                const providerLabel = searchProvider === "searxng" ? "SearXNG" : "Jina AI";
                                 $indicatorZone.html(
-                                    `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: web_search("${query}")</span></div>`
+                                    `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: web_search("${query}") via ${providerLabel}</span></div>`
                                 );
-                                const content = await fetchWebSearchContent(query);
+                                const content = searchProvider === "searxng" ? await fetchSearxngContent(query) : await fetchWebSearchContent(query);
+                                const parsedResults = searchProvider === "searxng" ? parseSearxngResults(content) : parseJinaSearchResults(content);
                                 messages.push({
                                     role: "tool",
                                     content: content
                                 });
                                 webReferences.push({ 
                                     query: query, 
-                                    results: parseJinaSearchResults(content) 
+                                    results: parsedResults
                                 });
                             }
                           }
@@ -937,6 +1139,27 @@ $(document).ready(function () {
                             });
                         }
                     });
+                    return results;
+                  }
+
+                  function parseSearxngResults(text) {
+                    const results = [];
+                    const lines = text.split("\n");
+                    let current = null;
+                    for (let i = 0; i < lines.length; i++) {
+                      const line = lines[i].trim();
+                      const titleMatch = line.match(/^\[\d+\]\s+Title:\s+(.+)/);
+                      if (titleMatch) {
+                        if (current) results.push(current);
+                        current = { title: titleMatch[1], url: "", description: "" };
+                      } else if (current) {
+                        const urlMatch = line.match(/URL Source:\s+(.+)/);
+                        if (urlMatch) current.url = urlMatch[1];
+                        const descMatch = line.match(/Description:\s+(.+)/);
+                        if (descMatch) current.description = descMatch[1];
+                      }
+                    }
+                    if (current) results.push(current);
                     return results;
                   }
   $newChatBtn.on("click", createNewChat);
