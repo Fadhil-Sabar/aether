@@ -47,6 +47,22 @@ $(document).ready(function () {
 
   const OLLAMA_BASE_URL = "http://localhost:11434";
 
+  function escapeHtml(value) {
+    return String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/\"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function sanitizeHtml(html) {
+    if (window.DOMPurify) {
+      return DOMPurify.sanitize(html, { USE_PROFILES: { html: true } });
+    }
+    return escapeHtml(html);
+  }
+
   // --- State ---
   let chats = JSON.parse(localStorage.getItem("ollama_chats")) || [];
   let currentChatId = localStorage.getItem("ollama_current_chat_id") || null;
@@ -97,6 +113,18 @@ $(document).ready(function () {
     });
   }
 
+  function safeUrl(value) {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "#";
+    try {
+      const parsed = new URL(raw, window.location.href);
+      if (["http:", "https:", "mailto:"].includes(parsed.protocol)) {
+        return parsed.href;
+      }
+    } catch (e) {}
+    return "#";
+  }
+
   // --- Model Fetching ---
   async function fetchModels() {
     try {
@@ -108,7 +136,7 @@ $(document).ready(function () {
       if (data.models && data.models.length > 0) {
         data.models.forEach((model) => {
           const name = model.name;
-          $modelSelect.append(`<option value="${name}">${name}</option>`);
+          $("<option>").val(name).text(name).appendTo($modelSelect);
         });
         if (prevVal) $modelSelect.val(prevVal);
       } else {
@@ -238,7 +266,7 @@ $(document).ready(function () {
       const chipHtml = `
                 <div class="flex items-center gap-2 px-3 py-1.5 bg-zinc-200 dark:bg-zinc-800 rounded-full text-[0.65rem] font-bold border border-zinc-300 dark:border-zinc-700 animate-in fade-in zoom-in">
                     <span class="opacity-50">${context.type === "file" ? "📄" : "🔗"}</span>
-                    <span class="truncate max-w-[120px]">${context.name}</span>
+                    <span class="truncate max-w-[120px]">${escapeHtml(context.name)}</span>
                     <button class="remove-ctx hover:text-red-500 transition-colors ml-1" data-index="${index}">×</button>
                 </div>
             `;
@@ -286,7 +314,11 @@ $(document).ready(function () {
       });
     }
     $(".chat-item").removeClass("active");
-    $(`.chat-item[data-id="${id}"]`).addClass("active");
+    $(".chat-item")
+      .filter(function () {
+        return $(this).data("id") === id;
+      })
+      .addClass("active");
     $chatArea.scrollTop($chatArea[0].scrollHeight);
   }
 
@@ -299,11 +331,11 @@ $(document).ready(function () {
     chats.forEach((chat) => {
       const activeClass = chat.id === currentChatId ? "active" : "";
       const chatItem = `
-                <div class="chat-item ${activeClass}" data-id="${chat.id}">
-                    <span class="chat-title-text">${chat.title}</span>
+                <div class="chat-item ${activeClass}" data-id="${escapeHtml(chat.id)}">
+                    <span class="chat-title-text">${escapeHtml(chat.title)}</span>
                     <div class="chat-item-actions">
-                        <button class="chat-action-btn rename-item" title="Rename" data-id="${chat.id}">✎</button>
-                        <button class="chat-action-btn delete-item" title="Delete" data-id="${chat.id}">×</button>
+                        <button class="chat-action-btn rename-item" title="Rename" data-id="${escapeHtml(chat.id)}">✎</button>
+                        <button class="chat-action-btn delete-item" title="Delete" data-id="${escapeHtml(chat.id)}">×</button>
                     </div>
                 </div>
             `;
@@ -348,9 +380,9 @@ $(document).ready(function () {
     const id = "msg-" + Date.now() + Math.random().toString(36).substr(2, 9);
     let content = "";
     if (isUser) {
-      content = text;
+      content = escapeHtml(text);
     } else if (isHtml) {
-      content = text;
+      content = sanitizeHtml(text);
     } else {
       const result = formatThinkResponse(text);
       content = typeof result === "string" ? result : result.html;
@@ -398,7 +430,7 @@ $(document).ready(function () {
             ${webRefs.map((ref, idx) => `
                 <div class="flex items-center gap-2 px-2 py-1 bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-md text-[0.6rem] font-bold text-zinc-500">
                     <span class="opacity-50">🔍</span>
-                    <span>${ref.query || ref}</span>
+                    <span>${escapeHtml(ref.query || ref)}</span>
                     <button class="view-ref-details ml-1 opacity-40 hover:opacity-100 transition-opacity" data-index="${idx}">
                         <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7" /></svg>
                     </button>
@@ -432,12 +464,12 @@ $(document).ready(function () {
         results.forEach(res => {
             const itemHtml = `
                 <div class="p-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl space-y-1">
-                    <a href="${res.url}" target="_blank" class="text-xs font-black text-zinc-900 dark:text-zinc-100 hover:underline flex items-center gap-2">
-                        ${res.title}
+                    <a href="${safeUrl(res.url)}" target="_blank" rel="noopener noreferrer" class="text-xs font-black text-zinc-900 dark:text-zinc-100 hover:underline flex items-center gap-2">
+                        ${escapeHtml(res.title)}
                         <svg class="w-3 h-3 opacity-40" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
                     </a>
-                    <span class="block text-[0.6rem] text-zinc-400 truncate">${res.url}</span>
-                    <p class="text-[0.65rem] leading-relaxed text-zinc-500 line-clamp-2">${res.description}</p>
+                    <span class="block text-[0.6rem] text-zinc-400 truncate">${escapeHtml(res.url)}</span>
+                    <p class="text-[0.65rem] leading-relaxed text-zinc-500 line-clamp-2">${escapeHtml(res.description)}</p>
                 </div>
             `;
             $content.append(itemHtml);
@@ -482,7 +514,7 @@ $(document).ready(function () {
 
   function safeMarkedParse(text, isStreaming = false) {
     if (!isStreaming)
-      return { html: marked.parse(text), isGeneratingCode: false };
+      return { html: sanitizeHtml(marked.parse(text)), isGeneratingCode: false };
     const parts = text.split("```");
     if (parts.length % 2 === 0) {
       const lastPart = parts[parts.length - 1];
@@ -491,12 +523,12 @@ $(document).ready(function () {
         langMatch && langMatch[1] ? langMatch[1].toUpperCase() : "CODE";
       const readyToRender = parts.slice(0, -1).join("```");
       return {
-        html: marked.parse(readyToRender),
+        html: sanitizeHtml(marked.parse(readyToRender)),
         isGeneratingCode: true,
         language: language,
       };
     }
-    return { html: marked.parse(text), isGeneratingCode: false };
+    return { html: sanitizeHtml(marked.parse(text)), isGeneratingCode: false };
   }
 
   function formatThinkResponse(text, nativeThinking = "", isStreaming = false) {
@@ -941,7 +973,7 @@ $(document).ready(function () {
           if (result.isGeneratingCode) {
             if ($indicatorZone.children().length === 0) {
               $indicatorZone.html(
-                `<div class="code-generating-indicator"><div class="spinner"></div><span>Generating ${result.language}...</span><div class="cursor"></div></div>`,
+                `<div class="code-generating-indicator"><div class="spinner"></div><span>Generating ${escapeHtml(result.language)}...</span><div class="cursor"></div></div>`,
               );
             } else {
               $indicatorZone.find("span").text(`Generating ${result.language}...`);
@@ -1043,7 +1075,7 @@ $(document).ready(function () {
               const url = tc.function.arguments.url;
               // UI indication
               $indicatorZone.html(
-                `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: process_link(${url})</span></div>`
+                `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: process_link(${escapeHtml(url)})</span></div>`
               );
 
               const content = await fetchLinkContent(url);
@@ -1057,7 +1089,7 @@ $(document).ready(function () {
                                 const query = tc.function.arguments.query;
                                 const providerLabel = searchProvider === "searxng" ? "SearXNG" : "Jina AI";
                                 $indicatorZone.html(
-                                    `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: web_search("${query}") via ${providerLabel}</span></div>`
+                                    `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: web_search("${escapeHtml(query)}") via ${escapeHtml(providerLabel)}</span></div>`
                                 );
                                 const content = searchProvider === "searxng" ? await fetchSearxngContent(query) : await fetchWebSearchContent(query);
                                 const parsedResults = searchProvider === "searxng" ? parseSearxngResults(content) : parseJinaSearchResults(content);
@@ -1109,7 +1141,7 @@ $(document).ready(function () {
                         $botMsgContainer.html(
                           `<div class="flex flex-col gap-2 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-xl">
                             <span class="text-xs font-black uppercase tracking-widest text-red-500">Sync Error</span>
-                            <p class="text-sm font-medium text-red-600 dark:text-red-400">${error.message || "Engine Not Responding"}</p>
+                            <p class="text-sm font-medium text-red-600 dark:text-red-400">${escapeHtml(error.message || "Engine Not Responding")}</p>
                           </div>`,
                         );
                       }

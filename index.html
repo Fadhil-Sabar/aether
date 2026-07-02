@@ -16,6 +16,8 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <!-- Marked -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- DOMPurify -->
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <!-- Highlight.js -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
@@ -325,8 +327,8 @@
                 <!-- Results injected here -->
             </div>
         </div>
-    <!-- Custom JS -->
-    <script src="script.js"></script>
+    </div>
+
     <!-- Toast Container -->
     <div id="toast-container" class="fixed bottom-24 right-6 z-[100] flex flex-col gap-3 pointer-events-none"></div>
 
@@ -343,5 +345,8 @@
         <button id="save-system-prompt" class="mt-4 w-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 text-[0.65rem] font-black uppercase tracking-widest py-3 rounded-xl hover:opacity-90 active:scale-95 transition-all">Save</button>
       </div>
     </div>
+
+    <!-- Custom JS -->
+    <script src="script.js"></script>
   </body>
 </html>
