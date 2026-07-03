@@ -87,6 +87,7 @@ $(document).ready(function () {
     }
     populateProviderSelect();
     fetchModels();
+    checkProviderStatus();
     renderProviderList();
   }
 
@@ -274,6 +275,7 @@ $(document).ready(function () {
     }
     populateProviderSelect();
     fetchModels();
+    checkProviderStatus();
     checkTheme();
     configureMarked();
     loadConfigToInputs();
@@ -298,7 +300,34 @@ $(document).ready(function () {
     return "#";
   }
 
-  // --- Model Fetching ---
+  async function checkProviderStatus() {
+    var provider = getActiveProvider();
+    var $dot = $('#engine-status').parent().find('div:first');
+    var $label = $('#engine-status');
+    $dot.removeClass('bg-green-500 bg-red-500 bg-yellow-500').addClass('bg-yellow-500');
+    $label.text('Checking...');
+    try {
+      if (window.AetherApp && window.AetherApp.adapters && window.AetherApp.adapters[provider.type]) {
+        var adapter = window.AetherApp.adapters[provider.type];
+        await adapter.fetchModels(provider.baseUrl.replace(/\/+$/, ''), provider.apiKey || '');
+      } else if (provider.type === 'ollama') {
+        var resp = await fetch(provider.baseUrl.replace(/\/+$/, '') + '/api/tags', { signal: AbortSignal.timeout(5000) });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        await resp.json();
+      } else {
+        var resp = await fetch(provider.baseUrl.replace(/\/+$/, '') + '/models', {
+          signal: AbortSignal.timeout(5000),
+          headers: provider.apiKey ? { 'Authorization': 'Bearer ' + provider.apiKey } : {}
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      }
+      $dot.removeClass('bg-yellow-500 bg-red-500').addClass('bg-green-500');
+      $label.text(provider.name + ' Online');
+    } catch (e) {
+      $dot.removeClass('bg-yellow-500 bg-green-500').addClass('bg-red-500');
+      $label.text(provider.name + ' Offline');
+    }
+  }
   async function fetchModels() {
     const provider = getActiveProvider();
     const baseUrl = getActiveBaseUrl();
@@ -329,7 +358,7 @@ $(document).ready(function () {
         models.forEach(function(model) {
           $('<option>').val(model.name).text(model.name).appendTo($modelSelect);
         });
-        if (prevVal && $modelSelect.find('option[value="' + CSS.escape(prevVal) + '"]').length) {
+        if (prevVal && $modelSelect.find('option[value="' + prevVal.replace(/"/g, '&quot;') + '"]').length) {
           $modelSelect.val(prevVal);
         }
       } else {
@@ -400,6 +429,7 @@ $(document).ready(function () {
   // ── Provider management in settings — render when settings opens
   $settingsBtn.on("click", function() {
     renderProviderList();
+    $sysPromptInput.val(customSystemPrompt);
     $settingsModal.removeClass("hidden").addClass("flex");
   });
 
@@ -1000,11 +1030,6 @@ $(document).ready(function () {
   }
 
   // --- System Prompt Modal ---
-  $settingsBtn.on("click", function() {
-    $sysPromptInput.val(customSystemPrompt);
-    // Already handled below for settings modal
-  });
-
   $closeSysPrompt.on("click", function() {
     $sysPromptModal.addClass("hidden").removeClass("flex");
   });
@@ -1236,71 +1261,229 @@ $(document).ready(function () {
       let isLooping = true;
       while (isLooping) {
         let toolCallsInPass = [];
-        const response = await fetch(getActiveBaseUrl() + '/api/chat', {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: currentAbortController.signal,
-          body: JSON.stringify({
+        
+        // ── Provider-aware streaming request ──
+        const provider2 = getActiveProvider();
+        const baseUrl2 = getActiveBaseUrl();
+        const apiKey2 = getActiveApiKey();
+        
+        if (provider2.type === 'ollama') {
+          // ── Ollama NDJSON streaming ──
+          const response = await fetch(baseUrl2 + '/api/chat', {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: currentAbortController.signal,
+            body: JSON.stringify({
+              model: selectedModel,
+              messages: messages,
+              tools: baseTools ? JSON.parse(JSON.stringify(baseTools)) : undefined,
+              think: thinkValue,
+              stream: true,
+              options: {
+                temperature: configParams.temperature,
+                num_ctx: configParams.num_ctx,
+                top_p: configParams.top_p,
+                top_k: configParams.top_k
+              }
+            }),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error(errorData.error || `HTTP Error ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n");
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              try {
+                const json = JSON.parse(line);
+                if (json.message) {
+                  if (json.message.content) fullResponse += json.message.content;
+                  if (json.message.thinking) localNativeThinking += json.message.thinking;
+                  if (json.message.tool_calls) toolCallsInPass.push(...json.message.tool_calls);
+                }
+                if (json.thinking) localNativeThinking += json.thinking;
+                if (json.done) {
+                  chat.context = json.context;
+                  if (json.total_duration) {
+                    finalMetrics = {
+                      total_duration: json.total_duration,
+                      load_duration: json.load_duration,
+                      prompt_eval_duration: json.prompt_eval_duration,
+                      eval_duration: json.eval_duration,
+                      eval_count: json.eval_count,
+                      prompt_eval_count: json.prompt_eval_count
+                    };
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+        } else if (provider2.type === 'openai') {
+          // ── OpenAI SSE streaming /v1/chat/completions ──
+          var headers = { "Content-Type": "application/json" };
+          if (apiKey2) headers["Authorization"] = "Bearer " + apiKey2;
+
+          var body = {
             model: selectedModel,
             messages: messages,
-            tools: baseTools ? JSON.parse(JSON.stringify(baseTools)) : undefined,
-            think: thinkValue,
             stream: true,
-            options: {
-              temperature: configParams.temperature,
-              num_ctx: configParams.num_ctx,
-              top_p: configParams.top_p,
-              top_k: configParams.top_k
-            }
-          }),
-        });
+            temperature: configParams.temperature || 0.7,
+            max_tokens: configParams.max_tokens || 4096,
+            top_p: configParams.top_p || 0.9,
+          };
+          if (baseTools) body.tools = JSON.parse(JSON.stringify(baseTools));
 
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}));
-          throw new Error(errorData.error || `HTTP Error ${response.status}`);
-        }
+          const response = await fetch(baseUrl2 + '/chat/completions', {
+            method: "POST",
+            headers: headers,
+            signal: currentAbortController.signal,
+            body: JSON.stringify(body),
+          });
 
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
-          for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-              const json = JSON.parse(line);
-              if (json.message) {
-                if (json.message.content) {
-                  fullResponse += json.message.content;
-                }
-                if (json.message.thinking) {
-                  localNativeThinking += json.message.thinking;
-                }
-                if (json.message.tool_calls) {
-                  toolCallsInPass.push(...json.message.tool_calls);
-                }
-              }
-              if (json.thinking) {
-                localNativeThinking += json.thinking;
-              }
-              if (json.done) {
-                chat.context = json.context;
-                if (json.total_duration) {
-                  finalMetrics = {
-                    total_duration: json.total_duration,
-                    load_duration: json.load_duration,
-                    prompt_eval_duration: json.prompt_eval_duration,
-                    eval_duration: json.eval_duration,
-                    eval_count: json.eval_count,
-                    prompt_eval_count: json.prompt_eval_count
-                  };
-                }
-              }
-            } catch (e) {}
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error((errorData.error && errorData.error.message) || errorData.error || `HTTP Error ${response.status}`);
           }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          var buffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            var sseLines = buffer.split("\n");
+            buffer = "";
+
+            for (var i = 0; i < sseLines.length; i++) {
+              var line2 = sseLines[i];
+              if (line2.indexOf("data: ") === 0) {
+                var dataStr = line2.substring(6).trim();
+                if (dataStr === "[DONE]") continue;
+                try {
+                  var json2 = JSON.parse(dataStr);
+                  var choices = json2.choices || [];
+                  if (choices.length > 0) {
+                    var delta = choices[0].delta || {};
+                    if (delta.content) fullResponse += delta.content;
+                    if (delta.tool_calls) {
+                      // OpenAI sends tool_calls incrementally; we need to accumulate
+                      delta.tool_calls.forEach(function(tc) {
+                        var existing = toolCallsInPass.find(function(et) { return et.index === tc.index; });
+                        if (!existing) {
+                          toolCallsInPass.push({
+                            index: tc.index,
+                            id: tc.id,
+                            type: tc.type,
+                            function: {
+                              name: tc.function ? tc.function.name || "" : "",
+                              arguments: tc.function ? tc.function.arguments || "" : "",
+                            }
+                          });
+                        } else {
+                          if (tc.function) {
+                            if (tc.function.name) existing.function.name += tc.function.name;
+                            if (tc.function.arguments) existing.function.arguments += tc.function.arguments;
+                          }
+                        }
+                      });
+                    }
+                    if (choices[0].finish_reason) {
+                      // done
+                    }
+                  }
+                  if (json2.usage) {
+                    finalMetrics = {
+                      total_duration: null,
+                      load_duration: null,
+                      prompt_eval_duration: null,
+                      eval_duration: null,
+                      eval_count: json2.usage.completion_tokens || 0,
+                      prompt_eval_count: json2.usage.prompt_tokens || 0,
+                    };
+                  }
+                } catch (e) {}
+              }
+            }
+          }
+        } else if (provider2.type === 'anthropic') {
+          // ── Anthropic SSE streaming /v1/messages ──
+          var converted = { messages: [], system: "" };
+          messages.forEach(function(msg) {
+            if (msg.role === "system") { converted.system += (converted.system ? "\n" : "") + msg.content; }
+            else { converted.messages.push(msg); }
+          });
+
+          var anthropicHeaders = {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey2 || "",
+            "anthropic-version": "2023-06-01",
+          };
+
+          var anthropicBody = {
+            model: selectedModel,
+            max_tokens: configParams.max_tokens || 4096,
+            messages: converted.messages,
+            stream: true,
+          };
+          if (configParams.temperature !== undefined) anthropicBody.temperature = configParams.temperature;
+          if (converted.system) anthropicBody.system = converted.system;
+          if (baseTools) {
+            anthropicBody.tools = baseTools.map(function(t) {
+              return { name: t.function.name, description: t.function.description || "", input_schema: t.function.parameters || {} };
+            });
+          }
+
+          const response = await fetch(baseUrl2 + '/messages', {
+            method: "POST",
+            headers: anthropicHeaders,
+            signal: currentAbortController.signal,
+            body: JSON.stringify(anthropicBody),
+          });
+
+          if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            throw new Error((errorData.error && errorData.error.message) || errorData.error || `HTTP Error ${response.status}`);
+          }
+
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          var anthropicBuffer = "";
+
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            anthropicBuffer += decoder.decode(value, { stream: true });
+            // Process SSE events (Anthropic: event: type\ndata: {...})
+            // For simplicity, we extract just the content
+            var eventMatch = anthropicBuffer.match(/event: content_block_delta\ndata: ({[^}]+})/);
+            if (eventMatch) {
+              try {
+                var blockDelta = JSON.parse(eventMatch[1]);
+                if (blockDelta.delta && blockDelta.delta.text) {
+                  fullResponse += blockDelta.delta.text;
+                }
+              } catch(e) {}
+              anthropicBuffer = anthropicBuffer.substring(eventMatch.index + eventMatch[0].length);
+            }
+            // Check for stop
+            if (anthropicBuffer.indexOf('event: message_stop') !== -1) {
+              // Done
+              anthropicBuffer = "";
+            }
+          }
+        } else {
+          throw new Error("Unsupported provider type: " + provider2.type);
         }
 
         if (toolCallsInPass.length > 0) {

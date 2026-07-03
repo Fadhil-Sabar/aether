@@ -312,10 +312,6 @@
     }
 
     function loadConfigToInputs() {
-      $tempInput.val(state.configParams.temperature);
-      $ctxInput.val(state.configParams.num_ctx);
-      $topPInput.val(state.configParams.top_p);
-      $topKInput.val(state.configParams.top_k);
       $showMetricsToggle.prop("checked", state.showMetrics);
       $toolsEnabledToggle.prop("checked", state.toolsEnabled);
       $webSearchToggle.prop("checked", state.webSearchEnabled);
@@ -334,43 +330,96 @@
       );
     }
 
+
+    function renderProviderConfigSection() {
+      var providerId = $settingsProviderSelect.val();
+      var providers = app.providers.loadProviders();
+      var provider = providers.find(function(p) { return p.id === providerId; });
+      if (!provider) { provider = providers[0]; }
+      var fields = app.providers.getParamFieldDefs(provider.type);
+      var config = provider.config || {};
+
+      var html = "";
+
+      // Provider name
+      html += "<div class=\"space-y-2\"><label class=\"text-[0.6rem] font-black uppercase tracking-widest opacity-40\">Provider Name</label>";
+      html += "<input type=\"text\" id=\"pfield-name\" value=\"" + rendering.escapeHtml(provider.name) + "\" class=\"w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all\"></div>";
+
+      // Base URL
+      html += "<div class=\"space-y-2\"><label class=\"text-[0.6rem] font-black uppercase tracking-widest opacity-40\">Base URL</label>";
+      html += "<input type=\"text\" id=\"pfield-baseurl\" value=\"" + rendering.escapeHtml(provider.baseUrl || "") + "\" class=\"w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all\"></div>";
+
+      // API Key
+      html += "<div class=\"space-y-2\"><label class=\"text-[0.6rem] font-black uppercase tracking-widest opacity-40\">API Key</label>";
+      html += "<input type=\"password\" id=\"pfield-apikey\" value=\"" + rendering.escapeHtml(provider.apiKey || "") + "\" placeholder=\"sk-...\" class=\"w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all\"></div>";
+
+      // Default Model
+      html += "<div class=\"space-y-2\"><label class=\"text-[0.6rem] font-black uppercase tracking-widest opacity-40\">Default Model</label>";
+      html += "<input type=\"text\" id=\"pfield-model\" value=\"" + rendering.escapeHtml(provider.defaultModel || "") + "\" class=\"w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all\"></div>";
+
+      // Divider + params header
+      if (fields.length > 0) {
+        html += "<div class=\"pt-2 border-t border-zinc-200 dark:border-zinc-800\"></div>";
+        html += "<div class=\"grid grid-cols-2 gap-4\">";
+
+        var count = 0;
+        for (var i = 0; i < fields.length; i++) {
+          var f = fields[i];
+          var val = config[f.key] !== undefined ? config[f.key] : f.defaultValue;
+          var inputId = "pfield-" + f.key;
+
+          html += "<div class=\"space-y-2\">";
+          html += "<label class=\"text-[0.6rem] font-black uppercase tracking-widest opacity-40\">" + rendering.escapeHtml(f.label) + "</label>";
+          html += "<input type=\"" + f.type + "\" id=\"" + inputId + "\" step=\"" + (f.step || 1) + "\" min=\"" + (f.min || 0) + "\" max=\"" + (f.max || 999999) + "\" value=\"" + val + "\" class=\"w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all\">";
+          html += "</div>";
+          count++;
+
+          if (count % 2 === 0 && i < fields.length - 1) {
+            html += "</div><div class=\"grid grid-cols-2 gap-4\">";
+          }
+        }
+
+        html += "</div>";
+      }
+
+      $providerConfigSection.html(html);
+    }
+
+    function populateProviderSelector() {
+      var providers = app.providers.loadProviders();
+      var activeId = app.providers.getActiveProviderId();
+      $settingsProviderSelect.empty();
+      providers.forEach(function(p) {
+        var option = $("<option>").val(p.id).text(p.name + " (" + app.providers.getProviderTypeLabel(p.type) + ")");
+        if (p.id === activeId) option.prop("selected", true);
+        $settingsProviderSelect.append(option);
+      });
+    }
+
+
     async function fetchModels() {
       const activeProvider = app.providers.getActiveProvider();
+      const adapter = app.adapters[activeProvider.type];
       const previousValue = $modelSelect.val();
       $modelSelect.empty();
 
-      if (activeProvider.type === "openai") {
-        try {
-          const models = await app.openaiProvider.fetchModels(activeProvider);
-          if (models.length > 0) {
-            models.forEach(function (name) {
-              $("<option>").val(name).text(name).appendTo($modelSelect);
-            });
-            if (previousValue) {
-              $modelSelect.val(previousValue);
-            }
-          } else {
-            $modelSelect.append('<option value="">No Models</option>');
-          }
-        } catch (error) {
-          $modelSelect.empty().append('<option value="">Offline</option>');
-        }
+      if (!adapter || typeof adapter.fetchModels !== "function") {
+        $modelSelect.append('<option value="">Unsupported</option>');
         updateThinkUIVisibility();
         return;
       }
 
-      // Generic adapter-based fetch for other providers
       try {
-        const adapter = app.adapters[activeProvider.type];
-        if (!adapter || typeof adapter.fetchModels !== "function") {
-          $modelSelect.append('<option value="">Unsupported</option>');
-          updateThinkUIVisibility();
-          return;
-        }
-        const models = await adapter.fetchModels(activeProvider.baseUrl, activeProvider.apiKey);
-        if (models.length > 0) {
-          models.forEach(function (model) {
-            $("<option>").val(model.name).text(model.name).appendTo($modelSelect);
+        const models = await adapter.fetchModels(
+          activeProvider.baseUrl,
+          activeProvider.apiKey,
+        );
+        if (models && models.length > 0) {
+          models.forEach(function (m) {
+            var name = typeof m === "string" ? m : m.name || m.id || "";
+            if (name) {
+              $("<option>").val(name).text(name).appendTo($modelSelect);
+            }
           });
           if (previousValue) {
             $modelSelect.val(previousValue);
@@ -652,7 +701,7 @@
             model: selectedModel,
             tools: baseTools,
             think: thinkValue,
-            config: state.configParams,
+            config: provider.config,
           }, {
             onContent: function (text) {
               fullResponse += text;
@@ -842,7 +891,9 @@
 
     $settingsBtn.on("click", function () {
       $sysPromptInput.val(state.customSystemPrompt);
-      openModal($settingsModal, { initialFocus: "#temp-input" });
+      populateProviderSelector();
+      renderProviderConfigSection();
+      openModal($settingsModal, { initialFocus: "#pfield-baseurl" });
     });
     $closeSettings.on("click", function () {
       closeModal($settingsModal);
@@ -853,7 +904,7 @@
       state.webSearchEnabled = $webSearchToggle.is(":checked");
       state.jinaApiKey = String($jinaApiKeyInput.val() || "").trim();
       state.searchProvider = $providerSearxng.is(":checked") ? "searxng" : "jina";
-      const normalizedSearxngUrl = searchProviders.normalizeServiceUrl(
+      var normalizedSearxngUrl = searchProviders.normalizeServiceUrl(
         $searxngUrlInput.val(),
         "http://172.17.0.1:8080",
       );
@@ -862,14 +913,34 @@
         return;
       }
       state.searxngUrl = normalizedSearxngUrl.url;
-      state.configParams = stateStorage.normalizeConfigParams({
-        temperature: $tempInput.val(),
-        num_ctx: $ctxInput.val(),
-        top_p: $topPInput.val(),
-        top_k: $topKInput.val(),
-      });
+
+      // Save provider config
+      var providerId = $settingsProviderSelect.val();
+      var providers = app.providers.loadProviders();
+      var provider = providers.find(function(p) { return p.id === providerId; });
+      if (provider) {
+        var config = {};
+        var fields = app.providers.getParamFieldDefs(provider.type);
+        for (var i = 0; i < fields.length; i++) {
+          var f = fields[i];
+          var $input = $("#pfield-" + f.key);
+          config[f.key] = $input.length ? $input.val() : f.defaultValue;
+        }
+        app.providers.updateProvider(providerId, {
+          name: String($("#pfield-name").val() || provider.name).trim(),
+          baseUrl: String($("#pfield-baseurl").val() || "").trim(),
+          apiKey: String($("#pfield-apikey").val() || "").trim(),
+          defaultModel: String($("#pfield-model").val() || "").trim(),
+          config: app.providers.normalizeProviderConfig(provider.type, config),
+        });
+
+        // If the saved provider is now active, refresh model list
+        if (providerId === app.providers.getActiveProviderId()) {
+          fetchModels();
+        }
+      }
+
       saveConfig();
-      loadConfigToInputs();
       if (state.currentChatId) {
         loadChat(state.currentChatId);
       }
@@ -879,6 +950,11 @@
         "success",
       );
     });
+
+    $settingsProviderSelect.on("change", function () {
+      renderProviderConfigSection();
+    });
+
     $settingsModal.on("click", function (event) {
       if (event.target === this) {
         closeModal($(this));

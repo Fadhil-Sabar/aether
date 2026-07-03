@@ -358,6 +358,28 @@
     normalizeImportedPayload: normalizeImportedPayload,
     parseJsonText: parseJsonText,
     parseNdjsonObjects: parseNdjsonObjects,
+    parseSSEStream: function (buffer, flush) {
+      const parts = String(buffer || "").split("\n\n");
+      const remainder = flush ? "" : parts.pop() || "";
+      const objects = [];
+      parts.forEach(function (block) {
+        const lines = block.split("\n");
+        lines.forEach(function (line) {
+          line = line.trim();
+          if (!line) return;
+          if (line === "data: [DONE]") return;
+          if (!line.startsWith("data: ")) return;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) return;
+          try {
+            objects.push(JSON.parse(jsonStr));
+          } catch (e) {
+            console.warn("SSE parse: skipping malformed chunk", jsonStr.slice(0, 200), e);
+          }
+        });
+      });
+      return { objects: objects, remainder: remainder };
+    },
     saveChats: saveChats,
     saveConfig: saveConfig,
     saveCurrentChatId: saveCurrentChatId,
