@@ -472,6 +472,15 @@ $(document).ready(function () {
         });
         if (prevVal && $modelSelect.find('option[value="' + prevVal.replace(/"/g, '&quot;') + '"]').length) {
           $modelSelect.val(prevVal);
+        } else if (!prevVal || prevVal === '') {
+          var activeProvider = getActiveProvider();
+          var defaultM = activeProvider.defaultModel || '';
+          if (defaultM && $modelSelect.find('option[value="' + defaultM.replace(/"/g, '&quot;') + '"]').length) {
+            $modelSelect.val(defaultM);
+          }
+        }
+        if (!($modelSelect.val())) {
+          $modelSelect.val($modelSelect.find('option:first').val());
         }
       } else {
         $modelSelect.append('<option value="">No Models</option>');
@@ -976,7 +985,7 @@ $(document).ready(function () {
       context: [], 
     };
     chats.unshift(newChat);
-    saveChats();
+    persistChat(newChat);
     activeContext = [];
     renderContextChips();
     renderChatList();
@@ -1325,7 +1334,7 @@ $(document).ready(function () {
     const msgIndex = chat.messages.findIndex(function(m) { return m.id === msgId; });
     if (msgIndex >= 0) {
       chat.messages.splice(msgIndex, 1);
-      saveChats();
+      persistChat(chat);
       $("#" + msgId).remove();
       showToast("Message deleted", "info");
       if (chat.messages.length === 0) $welcomeScreen.show();
@@ -1346,7 +1355,7 @@ $(document).ready(function () {
     }
     $userInput.val(msg.text).trigger("input").focus();
     chat.messages.splice(msgIndex, 1);
-    saveChats();
+    persistChat(chat);
     $("#" + msgId).remove();
     showToast("Edit your message and send", "info");
   });
@@ -1624,7 +1633,12 @@ $(document).ready(function () {
         var newChats = imported.filter(function(c) { return !existingIds.has(c.id); });
         if (newChats.length === 0) { showToast("All chats already exist", "warning"); return; }
         chats = newChats.concat(chats);
-        saveChats();
+        // Use batchAddChats to avoid clearing existing data
+        if (window.AetherDB && window.AetherDB.isReady()) {
+          window.AetherDB.batchAddChats(newChats).catch(function(err) {
+            console.warn("IndexedDB batchAddChats failed:", err);
+          });
+        }
         renderChatList();
         showToast("Imported " + newChats.length + " chat(s)", "success");
       } catch (err) {
@@ -1683,7 +1697,7 @@ $(document).ready(function () {
       $currentChatTitle.text(chat.title);
       renderChatList();
     }
-    saveChats();
+    persistChat(chat);
     $userInput.prop("disabled", true);
     $sendBtn.prop("disabled", true).addClass("opacity-50");
 
@@ -1980,7 +1994,7 @@ $(document).ready(function () {
                       processMessageContent($botMsgContainer);
                       $chatArea.scrollTop($chatArea[0].scrollHeight);
                       chat.messages.push({ id: uid("msg"), text: fullResponse, isUser: false, metrics: finalMetrics, webReferences: webReferences });
-                      saveChats();
+                      persistChat(chat);
                     } catch (error) {
                       if (animationFrameId) cancelAnimationFrame(animationFrameId);
                       if (error.name === "AbortError") {
