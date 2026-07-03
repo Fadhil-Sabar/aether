@@ -2,14 +2,16 @@
 
 A minimalist browser UI for interacting with multiple LLM providers (Ollama, OpenAI-compatible, Anthropic, and more). Forked from [ollama-interaction](https://github.com/Fadhil-Sabar/ollama-interaction) as a full rebrand toward provider-agnostic design. Chat history stays in your browser, but the app is not fully local by default: it loads several frontend assets from public CDNs and can send URLs or search queries to external services when you explicitly approve those requests.
 
-![Version](https://img.shields.io/badge/version-1.4.0-blue)
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Storage](https://img.shields.io/badge/chat%20storage-browser%20localStorage-orange)
 
 ## ✨ Features
 
 - 🌑 **Zinc Minimalist Design**: Clean monochrome UI with smooth transitions and dark/light mode support.
-- 🔄 **Multi-Provider**: Switch between Ollama, OpenAI-compatible, Anthropic Claude, and more — all from the same interface.
+- 🔄 **Multi-Provider**: Switch between Ollama, OpenAI-compatible, and Anthropic Claude providers.
+- 🛡️ **SSRF Protection**: URL validation blocks localhost and private-network targets before external requests.
+- ✅ **Confirmation Prompts**: All external link analysis and web search requests require user confirmation.
 - 📂 **Local RAG**: Attach `.txt`, `.md`, and similar files to provide direct context to the model.
 - 🔗 **Web Link Analysis**: Paste a URL to fetch and summarize content via Jina Reader.
 - 🌐 **Web Search Tools**: Search the web with Jina Search or a self-hosted SearXNG instance.
@@ -33,6 +35,10 @@ This repository is a static web app, but the default build/runtime path depends 
 - Optional alternative: self-hosted SearXNG via the settings panel
 
 If you want a more offline-friendly setup, you will need to vendor or self-host the frontend assets and choose only services you control.
+
+## 🏗 Architecture Note
+
+The runtime currently uses **`script.js`** as the monolithic application controller (state management, API calls, rendering, RAG, search). The `js/` directory contains modular components (`provider-manager.js`, `stream-parser.js`, provider adapters) that are loaded alongside `script.js` to provide provider abstraction and streaming support. Additional modular files (`chat-controller.js`, `rendering.js`, `state-storage.js`, `search-providers.js`) exist as a planned migration target but are **not yet wired** into `index.html`. The medium-term goal is a full cutover from `script.js` to the modular architecture, but for now the monolithic runtime is the source of truth.
 
 ## 🛠 Prerequisites
 

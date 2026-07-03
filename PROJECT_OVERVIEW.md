@@ -46,13 +46,20 @@ This project provides a clean, "Zen" style interface for LLMs. It focuses on pri
 ## 📂 Project Structure
 - `index.html`: Semantic structure and layout.
 - `style.css`: Custom design tokens, transitions, and Zinc theme variables.
-- `script.js`: State management, provider API integration, and RAG logic.
-- `js/`: Modular JavaScript components:
-  - `provider-manager.js` — Multi-provider CRUD and storage migration
-  - `state-storage.js` — localStorage abstraction layer
-  - `chat-controller.js` — Chat lifecycle and API communication
-  - `rendering.js` — DOM rendering utilities
-  - `search-providers.js` — Web search integration
+- `script.js`: **Monolithic runtime controller** — state management, provider API integration, rendering, RAG, and search logic. This is the active application entry point.
+- `js/`: Modular JavaScript components (partially wired). Only the following are loaded in `index.html`:
+  - `provider-manager.js` — Multi-provider CRUD and storage migration ✅ active
+  - `stream-parser.js` — Streaming response parser (Ollama NDJSON, OpenAI SSE, Anthropic SSE) ✅ active
+  - `providers/_adapter.js` — Provider adapter interface ✅ active
+  - `providers/ollama.js` — Ollama API adapter ✅ active
+  - `providers/openai.js` — OpenAI-compatible API adapter ✅ active
+  - `providers/anthropic.js` — Anthropic API adapter ✅ active
+  - `chat-controller.js` — Modular chat lifecycle (❌ not yet loaded; planned migration from `script.js`)
+  - `rendering.js` — DOM rendering utilities (❌ not yet loaded)
+  - `state-storage.js` — localStorage abstraction layer (❌ not yet loaded)
+  - `search-providers.js` — Web search integration (❌ not yet loaded)
+
+> **Architecture note:** The app is in a transitional state. `script.js` is the source of truth. The modular `js/` files exist as a migration target but are not wired as the runtime. Only the provider-abstraction layer (`provider-manager.js`, `stream-parser.js`, provider adapters) is actively loaded.
 
 ## 📝 Important Notes for Future Agents
 - **Multi-Provider**: The app supports multiple LLM providers via a provider abstraction layer. Provider configs live in `js/provider-manager.js`.

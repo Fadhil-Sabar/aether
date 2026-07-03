@@ -60,6 +60,11 @@ $(document).ready(function () {
     return getActiveProvider().apiKey || "";
   }
 
+  // ── ID Generator ──────────────────────────────────
+  function uid(prefix) {
+    return (prefix || "msg") + "-" + Date.now() + "-" + Math.random().toString(36).slice(2, 11);
+  }
+
   // ── Provider Select & Management ─────────────────
   function populateProviderSelect() {
     var providers = [];
@@ -433,36 +438,116 @@ $(document).ready(function () {
     $settingsModal.removeClass("hidden").addClass("flex");
   });
 
-  // --- Context Managers (RAG & Link Analysis) ---
+  // ── URL Security & SSRF Protection ──────────────────────
+  function isPrivateOrLocalHostname(hostname) {
+    var host = String(hostname || "").toLowerCase();
+    if (!host) return true;
+    if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+    if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return true;
+    if (/^169\.254\./.test(host) || /^0\./.test(host)) return true;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true;
+    if (host === "::1" || host === "[::1]" || host === "::" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return true;
+    return false;
+  }
+
+  function normalizeExternalUrl(value) {
+    var trimmed = String(value || "").trim();
+    // Strip trailing punctuation
+    while (/[.,!?;:]$/.test(trimmed)) trimmed = trimmed.slice(0, -1);
+    while (trimmed.endsWith(")")) {
+      var opens = (trimmed.match(/\(/g) || []).length;
+      var closes = (trimmed.match(/\)/g) || []).length;
+      if (closes <= opens) break;
+      trimmed = trimmed.slice(0, -1);
+    }
+    if (!trimmed) return { ok: false, error: "No URL provided." };
+    try {
+      var parsed = new URL(trimmed);
+      if (!["http:", "https:"].includes(parsed.protocol)) {
+        return { ok: false, error: "Only http:// and https:// URLs are supported." };
+      }
+      if (isPrivateOrLocalHostname(parsed.hostname)) {
+        return { ok: false, error: "Localhost and private-network URLs are blocked for security." };
+      }
+      // Strip credentials and fragment
+      parsed.username = "";
+      parsed.password = "";
+      parsed.hash = "";
+      return { ok: true, url: parsed.toString() };
+    } catch (e) {
+      return { ok: false, error: "Invalid URL format." };
+    }
+  }
+
+  function confirmExternalAction(kind, target, providerLabel) {
+    var detail = String(target || "").trim();
+    var subject = kind === "link" ? "URL" : "search query";
+    return confirm(
+      "This action will send the following " + subject + " to " + providerLabel + ":\n\n" + detail + "\n\nContinue?"
+    );
+  }
+
+  // ── Context Managers (RAG & Link Analysis) ---
   $attachBtn.on("click", () => $fileUpload.click());
 
   $fileUpload.on("change", function (e) {
     const file = e.target.files[0];
     if (!file) return;
 
+    // File size limit: 5MB
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("File too large. Maximum 5MB.", "error");
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = function (e) {
       const content = e.target.result;
+      if (content.length > 100000) {
+        showToast("File content too large. Maximum 100K characters.", "error");
+        return;
+      }
       addContext("file", file.name, content);
     };
     reader.readAsText(file);
-    $fileUpload.val(""); // Reset
+    $fileUpload.val("");
   });
 
   async function processLink(url) {
-    const jinaUrl = `https://r.jina.ai/${url}`;
+    var normalized = normalizeExternalUrl(url);
+    if (!normalized.ok) {
+      showToast(normalized.error, "error");
+      return;
+    }
+    if (!confirmExternalAction("link", normalized.url, "Jina Reader")) {
+      showToast("Link analysis cancelled.", "info");
+      return;
+    }
+    const jinaUrl = "https://r.jina.ai/" + encodeURI(normalized.url);
     try {
-      const response = await fetch(jinaUrl);
+      const response = await fetch(jinaUrl, {
+        headers: { "X-No-Cache": "true" }
+      });
+      if (!response.ok) throw new Error("HTTP " + response.status);
       const content = await response.text();
-      addContext("link", url, content);
+      addContext("link", normalized.url, content);
     } catch (error) {
       console.error("Link analysis failed:", error);
       showToast("Could not analyze the link. Make sure it's valid.", "error");
     }
   }
 
-  async function fetchLinkContent(url) {
-    const jinaUrl = `https://r.jina.ai/${url}`;
+  async function fetchLinkContent(url, options) {
+    var normalized = normalizeExternalUrl(url);
+    if (!normalized.ok) {
+      throw new Error(normalized.error);
+    }
+    if (!(options && options.skipConfirm)) {
+      if (!confirmExternalAction("link", normalized.url, "Jina Reader")) {
+        throw new Error("User declined sending URL to Jina Reader.");
+      }
+    }
+    const jinaUrl = "https://r.jina.ai/" + encodeURI(normalized.url);
     try {
       const response = await fetch(jinaUrl, {
         headers: { "X-No-Cache": "true" }
@@ -471,12 +556,17 @@ $(document).ready(function () {
       return await response.text();
     } catch (error) {
       console.error("Link analysis failed:", error);
-      return `Error: Could not analyze the link ${url}.`;
+      return "Error: Could not analyze the link " + url + ".";
     }
   }
 
-  async function fetchWebSearchContent(query) {
-    const jinaSearchUrl = `https://s.jina.ai/?q=${encodeURIComponent(query)}`;
+  async function fetchWebSearchContent(query, options) {
+    if (!(options && options.skipConfirm)) {
+      if (!confirmExternalAction("search", query, "Jina Search")) {
+        return "Error: Web search cancelled by user.";
+      }
+    }
+    const jinaSearchUrl = "https://s.jina.ai/?q=" + encodeURIComponent(query);
     const headers = {
       "X-Respond-With": "no-content"
     };
@@ -494,7 +584,12 @@ $(document).ready(function () {
     }
   }
 
-  async function fetchSearxngContent(query) {
+  async function fetchSearxngContent(query, options) {
+    if (!(options && options.skipConfirm)) {
+      if (!confirmExternalAction("search", query, "SearXNG (" + searxngUrl + ")")) {
+        return "Error: Web search cancelled by user.";
+      }
+    }
     const url = searxngUrl.replace(/\/+$/, "") + "/search";
     try {
       const response = await fetch(url, {
@@ -523,8 +618,28 @@ $(document).ready(function () {
     }
   }
 
+  // Total context chars limit across all items
+  var MAX_TOTAL_CONTEXT_CHARS = 200000;
+
   function addContext(type, name, content) {
     if (activeContext.some((c) => c.name === name)) return;
+
+    // Check per-item content limit (link content not checked upstream)
+    if (content && content.length > 100000) {
+      showToast("Content too large. Maximum 100K characters per item.", "error");
+      return;
+    }
+
+    // Check total context chars across ALL items
+    var totalChars = content ? content.length : 0;
+    for (var i = 0; i < activeContext.length; i++) {
+      totalChars += activeContext[i].content ? activeContext[i].content.length : 0;
+    }
+    if (totalChars > MAX_TOTAL_CONTEXT_CHARS) {
+      showToast("Total context content too large. Maximum " + (MAX_TOTAL_CONTEXT_CHARS / 1000) + "K characters across all items.", "error");
+      return;
+    }
+
     activeContext.push({ type, name, content });
     renderContextChips();
   }
@@ -1057,7 +1172,7 @@ $(document).ready(function () {
   // --- Export / Import ---
   $exportBtn.on("click", function() {
     if (chats.length === 0) { showToast("No chats to export", "warning"); return; }
-    var exportData = JSON.stringify({ version: "1.4.0", exportedAt: new Date().toISOString(), chats: chats }, null, 2);
+    var exportData = JSON.stringify({ version: "2.0.0", exportedAt: new Date().toISOString(), chats: chats }, null, 2);
     var blob = new Blob([exportData], { type: "application/json" });
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
@@ -1077,11 +1192,25 @@ $(document).ready(function () {
   $importFileInput.on("change", function(e) {
     var file = e.target.files[0];
     if (!file) return;
+    // Import file size limit: 5MB
+    if (file.size > 5 * 1024 * 1024) {
+      showToast("Import file too large. Maximum 5MB.", "error");
+      return;
+    }
     var reader = new FileReader();
     reader.onload = function(e) {
       try {
-        var data = JSON.parse(e.target.result);
+        var raw = e.target.result;
+        if (raw.length > 500000) {
+          showToast("Import data too large.", "error");
+          return;
+        }
+        var data = JSON.parse(raw);
         if (!data.chats || !Array.isArray(data.chats)) throw new Error("Invalid format");
+        if (data.chats.length > 200) {
+          showToast("Too many chats. Maximum 200.", "error");
+          return;
+        }
         // Merge: add imported chats, avoid duplicates by id
         var existingIds = new Set(chats.map(function(c) { return c.id; }));
         var imported = data.chats.filter(function(c) { return !existingIds.has(c.id); });
@@ -1140,7 +1269,7 @@ $(document).ready(function () {
     }
     userMessageWithContext += `### USER QUESTION:\n${rawMessage}`;
     messages.push({ role: "user", content: userMessageWithContext });
-    chat.messages.push({ text: rawMessage, isUser: true });
+    chat.messages.push({ id: uid("msg"), text: rawMessage, isUser: true });
     if (chat.title === "Untitled") {
       chat.title = rawMessage.substring(0, 30);
       $currentChatTitle.text(chat.title);
@@ -1267,224 +1396,35 @@ $(document).ready(function () {
         const baseUrl2 = getActiveBaseUrl();
         const apiKey2 = getActiveApiKey();
         
-        if (provider2.type === 'ollama') {
-          // ── Ollama NDJSON streaming ──
-          const response = await fetch(baseUrl2 + '/api/chat', {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: currentAbortController.signal,
-            body: JSON.stringify({
-              model: selectedModel,
-              messages: messages,
-              tools: baseTools ? JSON.parse(JSON.stringify(baseTools)) : undefined,
-              think: thinkValue,
-              stream: true,
-              options: {
-                temperature: configParams.temperature,
-                num_ctx: configParams.num_ctx,
-                top_p: configParams.top_p,
-                top_k: configParams.top_k
-              }
-            }),
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `HTTP Error ${response.status}`);
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            const chunk = decoder.decode(value, { stream: true });
-            const lines = chunk.split("\n");
-            for (const line of lines) {
-              if (!line.trim()) continue;
-              try {
-                const json = JSON.parse(line);
-                if (json.message) {
-                  if (json.message.content) fullResponse += json.message.content;
-                  if (json.message.thinking) localNativeThinking += json.message.thinking;
-                  if (json.message.tool_calls) toolCallsInPass.push(...json.message.tool_calls);
-                }
-                if (json.thinking) localNativeThinking += json.thinking;
-                if (json.done) {
-                  chat.context = json.context;
-                  if (json.total_duration) {
-                    finalMetrics = {
-                      total_duration: json.total_duration,
-                      load_duration: json.load_duration,
-                      prompt_eval_duration: json.prompt_eval_duration,
-                      eval_duration: json.eval_duration,
-                      eval_count: json.eval_count,
-                      prompt_eval_count: json.prompt_eval_count
-                    };
-                  }
-                }
-              } catch (e) {}
-            }
-          }
-        } else if (provider2.type === 'openai') {
-          // ── OpenAI SSE streaming /v1/chat/completions ──
-          var headers = { "Content-Type": "application/json" };
-          if (apiKey2) headers["Authorization"] = "Bearer " + apiKey2;
-
-          var body = {
-            model: selectedModel,
-            messages: messages,
-            stream: true,
-            temperature: configParams.temperature || 0.7,
-            max_tokens: configParams.max_tokens || 4096,
-            top_p: configParams.top_p || 0.9,
-          };
-          if (baseTools) body.tools = JSON.parse(JSON.stringify(baseTools));
-
-          const response = await fetch(baseUrl2 + '/chat/completions', {
-            method: "POST",
-            headers: headers,
-            signal: currentAbortController.signal,
-            body: JSON.stringify(body),
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error((errorData.error && errorData.error.message) || errorData.error || `HTTP Error ${response.status}`);
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          var buffer = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            var sseLines = buffer.split("\n");
-            buffer = "";
-
-            for (var i = 0; i < sseLines.length; i++) {
-              var line2 = sseLines[i];
-              if (line2.indexOf("data: ") === 0) {
-                var dataStr = line2.substring(6).trim();
-                if (dataStr === "[DONE]") continue;
-                try {
-                  var json2 = JSON.parse(dataStr);
-                  var choices = json2.choices || [];
-                  if (choices.length > 0) {
-                    var delta = choices[0].delta || {};
-                    if (delta.content) fullResponse += delta.content;
-                    if (delta.tool_calls) {
-                      // OpenAI sends tool_calls incrementally; we need to accumulate
-                      delta.tool_calls.forEach(function(tc) {
-                        var existing = toolCallsInPass.find(function(et) { return et.index === tc.index; });
-                        if (!existing) {
-                          toolCallsInPass.push({
-                            index: tc.index,
-                            id: tc.id,
-                            type: tc.type,
-                            function: {
-                              name: tc.function ? tc.function.name || "" : "",
-                              arguments: tc.function ? tc.function.arguments || "" : "",
-                            }
-                          });
-                        } else {
-                          if (tc.function) {
-                            if (tc.function.name) existing.function.name += tc.function.name;
-                            if (tc.function.arguments) existing.function.arguments += tc.function.arguments;
-                          }
-                        }
-                      });
-                    }
-                    if (choices[0].finish_reason) {
-                      // done
-                    }
-                  }
-                  if (json2.usage) {
-                    finalMetrics = {
-                      total_duration: null,
-                      load_duration: null,
-                      prompt_eval_duration: null,
-                      eval_duration: null,
-                      eval_count: json2.usage.completion_tokens || 0,
-                      prompt_eval_count: json2.usage.prompt_tokens || 0,
-                    };
-                  }
-                } catch (e) {}
-              }
-            }
-          }
-        } else if (provider2.type === 'anthropic') {
-          // ── Anthropic SSE streaming /v1/messages ──
-          var converted = { messages: [], system: "" };
-          messages.forEach(function(msg) {
-            if (msg.role === "system") { converted.system += (converted.system ? "\n" : "") + msg.content; }
-            else { converted.messages.push(msg); }
-          });
-
-          var anthropicHeaders = {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey2 || "",
-            "anthropic-version": "2023-06-01",
-          };
-
-          var anthropicBody = {
-            model: selectedModel,
-            max_tokens: configParams.max_tokens || 4096,
-            messages: converted.messages,
-            stream: true,
-          };
-          if (configParams.temperature !== undefined) anthropicBody.temperature = configParams.temperature;
-          if (converted.system) anthropicBody.system = converted.system;
-          if (baseTools) {
-            anthropicBody.tools = baseTools.map(function(t) {
-              return { name: t.function.name, description: t.function.description || "", input_schema: t.function.parameters || {} };
-            });
-          }
-
-          const response = await fetch(baseUrl2 + '/messages', {
-            method: "POST",
-            headers: anthropicHeaders,
-            signal: currentAbortController.signal,
-            body: JSON.stringify(anthropicBody),
-          });
-
-          if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error((errorData.error && errorData.error.message) || errorData.error || `HTTP Error ${response.status}`);
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          var anthropicBuffer = "";
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            anthropicBuffer += decoder.decode(value, { stream: true });
-            // Process SSE events (Anthropic: event: type\ndata: {...})
-            // For simplicity, we extract just the content
-            var eventMatch = anthropicBuffer.match(/event: content_block_delta\ndata: ({[^}]+})/);
-            if (eventMatch) {
-              try {
-                var blockDelta = JSON.parse(eventMatch[1]);
-                if (blockDelta.delta && blockDelta.delta.text) {
-                  fullResponse += blockDelta.delta.text;
-                }
-              } catch(e) {}
-              anthropicBuffer = anthropicBuffer.substring(eventMatch.index + eventMatch[0].length);
-            }
-            // Check for stop
-            if (anthropicBuffer.indexOf('event: message_stop') !== -1) {
-              // Done
-              anthropicBuffer = "";
-            }
-          }
-        } else {
+        // ── Adapter dispatch (provider-agnostic) ──
+        var adapter = window.AetherApp.adapters[provider2.type];
+        if (!adapter || typeof adapter.chat !== 'function') {
           throw new Error("Unsupported provider type: " + provider2.type);
         }
+
+        var chatOptions = {
+          model: selectedModel,
+          tools: baseTools ? JSON.parse(JSON.stringify(baseTools)) : undefined,
+          think: thinkValue,
+          config: configParams,
+        };
+
+        var chatCallbacks = {
+          onContent: function (text) { if (text) fullResponse += text; },
+          onThinking: function (text) { if (text) localNativeThinking += text; },
+          onToolCalls: function (calls) {
+            if (calls && calls.length > 0) {
+              toolCallsInPass = toolCallsInPass.concat(Array.isArray(calls) ? calls : [calls]);
+            }
+          },
+          onDone: function (metadata) {
+            if (metadata && metadata.metrics) {
+              finalMetrics = metadata.metrics;
+            }
+          },
+        };
+
+        await adapter.chat(baseUrl2, apiKey2, messages, chatOptions, chatCallbacks, currentAbortController.signal);
 
         if (toolCallsInPass.length > 0) {
           // Assistant message with tool calls
@@ -1551,7 +1491,7 @@ $(document).ready(function () {
                       }
                       processMessageContent($botMsgContainer);
                       $chatArea.scrollTop($chatArea[0].scrollHeight);
-                      chat.messages.push({ text: fullResponse, isUser: false, metrics: finalMetrics, webReferences: webReferences });
+                      chat.messages.push({ id: uid("msg"), text: fullResponse, isUser: false, metrics: finalMetrics, webReferences: webReferences });
                       saveChats();
                     } catch (error) {
                       if (animationFrameId) cancelAnimationFrame(animationFrameId);

@@ -7,7 +7,12 @@
   const KEYS = {
     providers: "aether_providers",
     activeProviderId: "aether_active_provider_id",
+    rememberApiKeys: "aether_remember_keys",
+    sessionApiKeys: "aether_session_api_keys",
   };
+
+  // ── In-memory (session-only) API key storage ──────────────
+  let _sessionOnlyKeys = {}; // { [providerId]: apiKey }
 
   // ── Provider Type Definitions ─────────────────────────────
   const PROVIDER_TYPES = {
@@ -115,6 +120,120 @@
     return migrated;
   }
 
+  // ── Remember API Keys Helpers ──────────────────────────────
+  function getRememberApiKeys() {
+    var val = localStorage.getItem(KEYS.rememberApiKeys);
+    // Default: true (remember/keep keys)
+    return val !== "false";
+  }
+
+  function setRememberApiKeys(enabled) {
+    if (enabled) {
+      localStorage.setItem(KEYS.rememberApiKeys, "true");
+    } else {
+      localStorage.removeItem(KEYS.rememberApiKeys);
+    }
+  }
+
+  /**
+   * Restore session-only keys from sessionStorage into in-memory map.
+   * Called on boot so keys survive page refreshes (but not tab closure).
+   */
+  function initSessionOnlyKeys() {
+    if (getRememberApiKeys()) {
+      _sessionOnlyKeys = {};
+      return;
+    }
+    try {
+      var raw = sessionStorage.getItem(KEYS.sessionApiKeys);
+      if (raw) {
+        _sessionOnlyKeys = JSON.parse(raw);
+      }
+    } catch (e) {
+      _sessionOnlyKeys = {};
+    }
+  }
+
+  /**
+   * Persist the in-memory session-only keys to sessionStorage.
+   */
+  function flushSessionOnlyKeys() {
+    if (getRememberApiKeys()) {
+      // Not in session-only mode — clear any stale keys
+      _sessionOnlyKeys = {};
+      try { sessionStorage.removeItem(KEYS.sessionApiKeys); } catch (e) {}
+      return;
+    }
+    try {
+      var keys = {};
+      for (var k in _sessionOnlyKeys) {
+        if (_sessionOnlyKeys.hasOwnProperty(k) && _sessionOnlyKeys[k]) {
+          keys[k] = _sessionOnlyKeys[k];
+        }
+      }
+      if (Object.keys(keys).length > 0) {
+        sessionStorage.setItem(KEYS.sessionApiKeys, JSON.stringify(keys));
+      } else {
+        sessionStorage.removeItem(KEYS.sessionApiKeys);
+      }
+    } catch (e) {}
+  }
+
+  /** Strip apiKey from a provider and store it separately. */
+  function saveApiKeySeparately(id, apiKey) {
+    _sessionOnlyKeys[id] = apiKey || "";
+    flushSessionOnlyKeys();
+  }
+
+  /** Get stored apiKey for a provider id. */
+  function getStoredApiKey(id) {
+    var key = _sessionOnlyKeys[id];
+    if (key !== undefined) return key;
+    // Fallback: check if it's in sessionStorage directly
+    try {
+      var raw = sessionStorage.getItem(KEYS.sessionApiKeys);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        return parsed[id] || "";
+      }
+    } catch (e) {}
+    return "";
+  }
+
+  /** Remove apiKey tracking for a provider. */
+  function removeApiKeyEntry(id) {
+    delete _sessionOnlyKeys[id];
+    flushSessionOnlyKeys();
+  }
+
+  /** Sanitize providers array: strip apiKey from each when remember is off. */
+  function sanitizeProvidersForStorage(rawProviders) {
+    if (getRememberApiKeys()) return rawProviders;
+    // Deep clone to avoid mutating the argument
+    var stripped = rawProviders.map(function (p) {
+      var copy = {};
+      for (var k in p) {
+        if (p.hasOwnProperty(k) && k !== "apiKey") {
+          copy[k] = p[k];
+        }
+      }
+      return copy;
+    });
+    return stripped;
+  }
+
+  /** Restore apiKeys from session-only storage into a providers array. */
+  function restoreApiKeys(providers) {
+    if (getRememberApiKeys()) return providers;
+    return providers.map(function (p) {
+      var key = getStoredApiKey(p.id);
+      if (key) {
+        return Object.assign({}, p, { apiKey: key });
+      }
+      return p;
+    });
+  }
+
   // ── Provider CRUD ─────────────────────────────────────────
   function loadProviders() {
     try {
@@ -124,14 +243,23 @@
       if (!Array.isArray(parsed) || parsed.length === 0) {
         return createDefaultProviders();
       }
-      return parsed;
+      // Restore apiKeys from session-only storage if remember is off
+      return restoreApiKeys(parsed);
     } catch (e) {
       return createDefaultProviders();
     }
   }
 
   function saveProviders(providers) {
-    localStorage.setItem(KEYS.providers, JSON.stringify(providers));
+    // Save separately any apiKeys if remember is off
+    if (!getRememberApiKeys()) {
+      providers.forEach(function (p) {
+        if (p.apiKey) {
+          saveApiKeySeparately(p.id, p.apiKey);
+        }
+      });
+    }
+    localStorage.setItem(KEYS.providers, JSON.stringify(sanitizeProvidersForStorage(providers)));
   }
 
   function getActiveProviderId() {
@@ -186,6 +314,8 @@
       providers = createDefaultProviders();
     }
     saveProviders(providers);
+    // Clean up session-only apiKey entry
+    removeApiKeyEntry(id);
     // If active provider was removed, switch to first
     if (getActiveProviderId() === id) {
       setActiveProviderId(providers[0].id);
@@ -266,8 +396,17 @@
     getParamFieldDefs: getParamFieldDefs,
     normalizeProviderConfig: normalizeProviderConfig,
     createDefaultProviders: createDefaultProviders,
+    // Session-only key helpers
+    getRememberApiKeys: getRememberApiKeys,
+    setRememberApiKeys: setRememberApiKeys,
+    initSessionOnlyKeys: initSessionOnlyKeys,
+    saveApiKeySeparately: saveApiKeySeparately,
+    getStoredApiKey: getStoredApiKey,
+    removeApiKeyEntry: removeApiKeyEntry,
   };
 
   // Run migration on init
   migrateOldStorage();
+  // Load session-only keys from sessionStorage
+  initSessionOnlyKeys();
 })(window);

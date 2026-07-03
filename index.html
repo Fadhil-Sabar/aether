@@ -9,18 +9,14 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
       rel="stylesheet"
     />
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Vendored Assets (SRI pinned) -->
+    <script src="js/vendor/tailwind.min.js"></script>
     <link rel="stylesheet" href="style.css" />
-    <!-- jQuery -->
-    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-    <!-- Marked -->
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <!-- DOMPurify -->
-    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
-    <!-- Highlight.js -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+    <script src="js/vendor/jquery.min.js"></script>
+    <script src="js/vendor/marked.min.js"></script>
+    <script src="js/vendor/purify.min.js"></script>
+    <link rel="stylesheet" href="js/vendor/github-dark.min.css">
+    <script src="js/vendor/highlight.min.js"></script>
   </head>
   <body
     class="bg-zinc-100 dark:bg-zinc-950 min-h-screen text-zinc-900 dark:text-zinc-100 transition-colors duration-200"
@@ -52,7 +48,7 @@
             <div class="flex items-center justify-between">
               <div class="flex flex-col">
                 <span class="text-[0.55rem] font-black uppercase tracking-widest text-zinc-400">Aether Engine</span>
-                <span class="text-[0.5rem] font-medium text-zinc-300 dark:text-zinc-700 select-none">Revision 1.4.0</span>
+                <span id="app-version-footer" class="text-[0.5rem] font-medium text-zinc-300 dark:text-zinc-700 select-none">Revision 2.0.0</span>
               </div>
               <button
                 id="theme-toggle"
@@ -255,6 +251,19 @@
 
                     <div class="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl">
                         <div class="flex flex-col gap-0.5">
+                            <span class="text-[0.65rem] font-black uppercase tracking-widest">Remember API Keys</span>
+                            <span class="text-[0.55rem] text-zinc-400 font-bold uppercase tracking-tighter">Keep API keys in browser storage</span>
+                        </div>
+                        <input type="checkbox" id="remember-keys-toggle" class="w-4 h-4 accent-zinc-900 dark:accent-zinc-100 cursor-pointer">
+                    </div>
+                    <div id="api-key-warning" class="hidden px-4 py-2.5 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 rounded-xl">
+                        <p class="text-[0.55rem] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-widest leading-relaxed">
+                            ⚠ API keys are stored in your browser as session-only data. They will be cleared when you close this tab.
+                        </p>
+                    </div>
+
+                    <div class="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl">
+                        <div class="flex flex-col gap-0.5">
                             <span class="text-[0.65rem] font-black uppercase tracking-widest">Web Search</span>
                             <span class="text-[0.55rem] text-zinc-400 font-bold uppercase tracking-tighter">Enable autonomous web search</span>
                         </div>
@@ -373,6 +382,7 @@
           <div>
             <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40 block mb-1">API Key</label>
             <input type="password" id="provider-key-input" placeholder="sk-..." class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+            <p id="provider-key-storage-note" class="mt-1.5 text-[0.5rem] font-bold text-amber-500 uppercase tracking-wider hidden">⚠ Key stored in browser. Disable \"Remember API Keys\" in settings for session-only mode.</p>
           </div>
           <div>
             <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40 block mb-1">Default Model</label>

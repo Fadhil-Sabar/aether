@@ -111,130 +111,146 @@
     },
 
     /**
-     * Send a chat request to Anthropic Claude API with streaming
-     */
-    chat: function (config) {
-      var baseUrl = config.baseUrl.replace(/\/+$/, "");
-      var model = config.model;
-      var messages = config.messages;
-      var options = config.options || {};
-      var apiKey = config.apiKey;
-      var signal = config.signal;
-      var onChunk = config.onChunk || function () {};
-      var onDone = config.onDone || function () {};
-      var onError = config.onError || function () {};
+      * Send a chat request to Anthropic Claude API with streaming
+      *
+      * Standard adapter contract:
+      *   chat(baseUrl, apiKey, messages, options, callbacks, signal)
+      *
+      * callbacks: { onContent(text), onThinking(text), onToolCalls(calls), onDone(metadata) }
+      */
+     chat: async function (baseUrl, apiKey, messages, options, callbacks, signal) {
+       baseUrl = String(baseUrl || "").replace(/\/+$/, "");
+       var model = options.model;
+       var tools = options.tools;
+       var think = options.think;
+       var config = options.config || {};
+       var safeCallbacks = callbacks || {};
 
-      // Convert messages to Anthropic format
-      var converted = this._convertMessages(messages);
+       if (!safeCallbacks.onContent) safeCallbacks.onContent = function () {};
+       if (!safeCallbacks.onThinking) safeCallbacks.onThinking = function () {};
+       if (!safeCallbacks.onToolCalls) safeCallbacks.onToolCalls = function () {};
+       if (!safeCallbacks.onDone) safeCallbacks.onDone = function () {};
 
-      var headers = {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey || "",
-        "anthropic-version": "2023-06-01",
-      };
+       // Convert messages to Anthropic format
+       var converted = this._convertMessages(messages);
 
-      var body = {
-        model: model,
-        max_tokens: options.max_tokens || 4096,
-        messages: converted.messages,
-        stream: true,
-      };
+       var headers = {
+         "Content-Type": "application/json",
+         "x-api-key": apiKey || "",
+         "anthropic-version": "2023-06-01",
+       };
 
-      if (options.temperature !== undefined) {
-        body.temperature = options.temperature;
-      }
+       var body = {
+         model: model,
+         max_tokens: config.max_tokens || 4096,
+         messages: converted.messages,
+         stream: true,
+       };
 
-      if (converted.system) {
-        body.system = converted.system;
-      }
+       if (config.temperature !== undefined) {
+         body.temperature = config.temperature;
+       }
 
-      // Add thinking config if applicable
-      if (options.thinkValue && options.thinkValue !== "false") {
-        body.thinking = {
-          type: "enabled",
-          budget_tokens: options.thinkValue === "low" ? 1024
-                       : options.thinkValue === "medium" ? 4096
-                       : options.thinkValue === "high" ? 16384
-                       : 2048,
-        };
-      }
+       if (converted.system) {
+         body.system = converted.system;
+       }
 
-      // Add tools if provided (Anthropic tools format)
-      if (options.tools) {
-        body.tools = options.tools.map(function (t) {
-          // Convert from OpenAI tool format to Anthropic if needed
-          if (t.type === "function" && t.function) {
-            return {
-              name: t.function.name,
-              description: t.function.description || "",
-              input_schema: t.function.parameters || {},
-            };
-          }
-          return t;
-        });
-      }
+       // Add thinking config if applicable
+       if (think && think !== "false") {
+         body.thinking = {
+           type: "enabled",
+           budget_tokens: think === "low" ? 1024
+                        : think === "medium" ? 4096
+                        : think === "high" ? 16384
+                        : 2048,
+         };
+       }
 
-      return fetch(baseUrl + "/messages", {
-        method: "POST",
-        headers: headers,
-        signal: signal,
-        body: JSON.stringify(body),
-      })
-        .then(function (response) {
-          if (!response.ok) {
-            return response.json().then(function (errData) {
-              throw new Error(
-                (errData.error && errData.error.message) ||
-                errData.error ||
-                "HTTP Error " + response.status
-              );
-            });
-          }
-          if (!response.body) {
-            throw new Error("Streaming response body is unavailable");
-          }
+       // Add tools if provided (Anthropic tools format)
+       if (tools) {
+         body.tools = tools.map(function (t) {
+           // Convert from OpenAI tool format to Anthropic if needed
+           if (t.type === "function" && t.function) {
+             return {
+               name: t.function.name,
+               description: t.function.description || "",
+               input_schema: t.function.parameters || {},
+             };
+           }
+           return t;
+         });
+       }
 
-          var parser = app.streamParser.createParser("anthropic");
-          var reader = response.body.getReader();
-          var decoder = new TextDecoder();
+       var response;
+       try {
+         response = await fetch(baseUrl + "/messages", {
+           method: "POST",
+           headers: headers,
+           signal: signal,
+           body: JSON.stringify(body),
+         });
+       } catch (err) {
+         if (err.name === "AbortError") {
+           // AbortError is expected on user cancellation — don't rethrow
+           return;
+         }
+         throw err;
+       }
 
-          function readStream() {
-            return reader.read().then(function (chunkResult) {
-              if (chunkResult.done) {
-                var flushed = parser.parseChunk(decoder.decode());
-                if (flushed.text || flushed.thinking) {
-                  onChunk(flushed);
-                }
-                onDone(flushed);
-                return;
-              }
+       if (!response.ok) {
+         var errData = {};
+         try {
+           errData = await response.json();
+         } catch (_) {}
+         throw new Error(
+           (errData.error && errData.error.message) ||
+           errData.error ||
+           "HTTP Error " + response.status
+         );
+       }
 
-              var text = decoder.decode(chunkResult.value, { stream: true });
-              var parsed = parser.parseChunk(text);
+       if (!response.body) {
+         throw new Error("Streaming response body is unavailable");
+       }
 
-              if (parsed.text || parsed.thinking || parsed.toolCalls.length > 0) {
-                onChunk(parsed);
-              }
+       var parser = app.streamParser.createParser("anthropic");
+       var reader = response.body.getReader();
+       var decoder = new TextDecoder();
 
-              if (parsed.done) {
-                onDone(parsed);
-                return;
-              }
+       while (true) {
+         var chunkResult = await reader.read();
+         if (chunkResult.done) {
+           var flushed = parser.parseChunk(decoder.decode(), true);
+           if (flushed.text) safeCallbacks.onContent(flushed.text);
+           if (flushed.thinking) safeCallbacks.onThinking(flushed.thinking);
+           if (flushed.toolCalls && flushed.toolCalls.length > 0) {
+             safeCallbacks.onToolCalls(flushed.toolCalls);
+           }
+           safeCallbacks.onDone({
+             context: flushed._context || [],
+             metrics: flushed.metrics || null,
+           });
+           break;
+         }
 
-              return readStream();
-            });
-          }
+         var text = decoder.decode(chunkResult.value, { stream: true });
+         var parsed = parser.parseChunk(text, false);
 
-          return readStream();
-        })
-        .catch(function (err) {
-          if (err.name === "AbortError") {
-            onError({ name: "AbortError", message: "Request aborted" });
-          } else {
-            onError(err);
-          }
-        });
-    },
+         if (parsed.text) safeCallbacks.onContent(parsed.text);
+         if (parsed.thinking) safeCallbacks.onThinking(parsed.thinking);
+         if (parsed.toolCalls && parsed.toolCalls.length > 0) {
+           safeCallbacks.onToolCalls(parsed.toolCalls);
+         }
+
+         if (parsed.done) {
+           safeCallbacks.onDone({
+             context: parsed._context || [],
+             metrics: parsed.metrics || null,
+           });
+           break;
+         }
+       }
+     },
   };
 
   // Register adapter
