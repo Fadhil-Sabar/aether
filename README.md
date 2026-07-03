@@ -1,18 +1,19 @@
 # ⚡ Aether: Multi-Provider LLM Chat Interface
 
-A minimalist browser UI for interacting with multiple LLM providers (Ollama, OpenAI-compatible, and more). Forked from [ollama-interaction](https://github.com/Fadhil-Sabar/ollama-interaction) with flexible provider support. Chat history stays in your browser, but the app is not fully local by default: it loads several frontend assets from public CDNs and can send URLs or search queries to external services when you explicitly approve those requests.
+A minimalist browser UI for interacting with multiple LLM providers (Ollama, OpenAI-compatible, Anthropic, and more). Forked from [ollama-interaction](https://github.com/Fadhil-Sabar/ollama-interaction) as a full rebrand toward provider-agnostic design. Chat history stays in your browser, but the app is not fully local by default: it loads several frontend assets from public CDNs and can send URLs or search queries to external services when you explicitly approve those requests.
 
-![Version](https://img.shields.io/badge/version-1.2.0-blue)
+![Version](https://img.shields.io/badge/version-1.4.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Storage](https://img.shields.io/badge/chat%20storage-browser%20localStorage-orange)
 
 ## ✨ Features
 
 - 🌑 **Zinc Minimalist Design**: Clean monochrome UI with smooth transitions and dark/light mode support.
+- 🔄 **Multi-Provider**: Switch between Ollama, OpenAI-compatible, Anthropic Claude, and more — all from the same interface.
 - 📂 **Local RAG**: Attach `.txt`, `.md`, and similar files to provide direct context to the model.
 - 🔗 **Web Link Analysis**: Paste a URL to fetch and summarize content via Jina Reader.
 - 🌐 **Web Search Tools**: Search the web with Jina Search or a self-hosted SearXNG instance.
-- 💾 **Browser Persistence**: Chat history and settings are stored in `localStorage`.
+- 💾 **Browser Persistence**: Chat history and settings are stored in `localStorage` under the `aether_` key prefix.
 - ⚡ **Zero Backend**: The app is a static frontend; no Node.js or Python server is required.
 
 ## 🧩 Runtime Dependencies
@@ -35,8 +36,10 @@ If you want a more offline-friendly setup, you will need to vendor or self-host 
 
 ## 🛠 Prerequisites
 
+### For Ollama provider:
+
 1. **Install Ollama**: Download and install from [ollama.com](https://ollama.com).
-2. **Allow browser access to Ollama**: Since the UI runs in the browser, you must allow Ollama to accept requests from your local origin.
+2. **Allow browser access**: Since the UI runs in the browser, you must allow Ollama to accept requests from your local origin.
 
    ```bash
    # For Linux/macOS
@@ -44,18 +47,29 @@ If you want a more offline-friendly setup, you will need to vendor or self-host 
    ollama serve
    ```
 
-3. **Optional web-search setup**:
-   - Use Jina Search as-is, optionally with a Jina API key
-   - Or run SearXNG and point the app to your instance in Settings
+3. **Pull a model**:
+   ```bash
+   ollama pull llama3
+   ```
+
+### For OpenAI-compatible providers:
+
+1. Obtain an API key from your provider (OpenAI, Groq, Together, etc.).
+2. In Aether's Settings panel, add a new provider with your base URL and API key.
+
+### For Anthropic Claude:
+
+1. Obtain an API key from [console.anthropic.com](https://console.anthropic.com).
+2. In Aether's Settings panel, add an Anthropic Claude provider.
 
 ## 🚀 Getting Started
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-username/ollama-interaction.git
+   git clone https://github.com/Fadhil-Sabar/aether.git
    ```
 2. Open `index.html` in a modern web browser.
-3. Select your model from the dropdown (make sure you have models pulled, e.g. `ollama pull llama3`).
+3. Select your provider and model from the settings panel.
 4. Start chatting!
 
 ## 📄 How to use RAG
@@ -73,6 +87,25 @@ If you want a more offline-friendly setup, you will need to vendor or self-host 
 
 - **Chat Interface**: Clean threaded view with role-based alignment.
 - **Context Chips**: Interactive chips for attached documents.
+
+## 🔧 Configuration
+
+All settings are persisted in browser `localStorage` under keys prefixed with `aether_`:
+
+| Key | Description |
+|---|---|
+| `aether_chats` | Serialized chat history |
+| `aether_current_chat_id` | Active chat identifier |
+| `aether_providers` | Provider configurations |
+| `aether_active_provider_id` | Currently selected provider |
+| `aether_show_metrics` | Toggle performance metrics |
+| `aether_tools_enabled` | Toggle tool-calling support |
+| `aether_web_search` | Toggle web search capability |
+| `aether_system_prompt` | Custom system prompt override |
+
+## 🔄 Migration from ollama_* keys
+
+If you used the original **ollama-interaction** app, Aether automatically migrates your existing `ollama_*` localStorage keys to `aether_*` on first load (the old keys are cleaned up). No data loss — your chats and settings carry over seamlessly.
 
 ## ⚖️ License
 

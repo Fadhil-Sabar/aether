@@ -117,8 +117,9 @@
                </select>
             </div>
 
-            <div class="hidden sm:block">
-              <select id="model-select" class="text-xs"></select>
+            <div class="hidden sm:flex items-center gap-2">
+              <select id="provider-select" class="text-xs min-w-[110px]"></select>
+              <select id="model-select" class="text-xs min-w-[130px]"></select>
             </div>
 
             <!-- Settings Button -->
@@ -223,30 +224,15 @@
             </div>
 
             <div class="space-y-6">
-                <div class="grid grid-cols-2 gap-4">
-                    <!-- Temperature -->
-                    <div class="space-y-2">
-                        <label class="text-[0.6rem] font-black uppercase tracking-widest opacity-40">Temperature</label>
-                        <input type="number" id="temp-input" step="0.1" min="0" max="2" value="0.7" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
-                    </div>
-                    <!-- Context Size -->
-                    <div class="space-y-2">
-                        <label class="text-[0.6rem] font-black uppercase tracking-widest opacity-40">Context Size</label>
-                        <input type="number" id="ctx-input" step="1024" min="2048" max="131072" value="16384" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
-                    </div>
+                <!-- Provider Selector -->
+                <div class="space-y-2">
+                    <label class="text-[0.6rem] font-black uppercase tracking-widest opacity-40">Provider</label>
+                    <select id="settings-provider-select" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all cursor-pointer">
+                    </select>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <!-- Top P -->
-                    <div class="space-y-2">
-                        <label class="text-[0.6rem] font-black uppercase tracking-widest opacity-40">Top P</label>
-                        <input type="number" id="top-p-input" step="0.05" min="0" max="1" value="0.9" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
-                    </div>
-                    <!-- Top K -->
-                    <div class="space-y-2">
-                        <label class="text-[0.6rem] font-black uppercase tracking-widest opacity-40">Top K</label>
-                        <input type="number" id="top-k-input" step="1" min="0" max="100" value="40" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
-                    </div>
+                <!-- Provider Config Section (rendered by JS) -->
+                <div id="provider-config-section" class="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-4">
                 </div>
 
                 <!-- Metrics Toggle -->
@@ -301,6 +287,17 @@
                     </div>
                 </div>
 
+                <!-- ═══ Provider Management ═══ -->
+                <div class="pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                  <div class="flex items-center justify-between mb-3">
+                    <span class="text-[0.6rem] font-black uppercase tracking-widest opacity-40">Provider Management</span>
+                    <button id="add-provider-btn" class="text-[0.55rem] font-black uppercase tracking-wider px-3 py-1.5 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 rounded-lg hover:opacity-80 transition-all">+ Add</button>
+                  </div>
+                  <div id="provider-list" class="space-y-2 max-h-48 overflow-y-auto">
+                    <!-- Provider cards injected here -->
+                  </div>
+                </div>
+
                 <button id="save-settings" class="w-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 text-[0.65rem] font-black uppercase tracking-widest py-4 rounded-xl hover:opacity-90 active:scale-95 transition-all">
                     Update Configurations
                 </button>
@@ -346,7 +343,53 @@
       </div>
     </div>
 
+    <!-- Provider Edit/Create Modal -->
+    <div id="provider-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/20 dark:bg-zinc-950/60 backdrop-blur-sm transition-all">
+      <div class="bg-white dark:bg-zinc-900 w-[90%] max-w-md rounded-2xl p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800">
+        <div class="flex items-center justify-between mb-4">
+          <h3 id="provider-modal-title" class="text-xs font-black uppercase tracking-widest text-zinc-400">Add Provider</h3>
+          <button id="close-provider-modal" class="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+        <div class="space-y-3">
+          <input type="hidden" id="provider-edit-id" value="">
+          <div>
+            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40 block mb-1">Provider Name</label>
+            <input type="text" id="provider-name-input" placeholder="My Provider" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+          </div>
+          <div>
+            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40 block mb-1">Type</label>
+            <select id="provider-type-input" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+              <option value="ollama">Ollama</option>
+              <option value="openai">OpenAI-Compatible</option>
+              <option value="anthropic">Anthropic Claude</option>
+            </select>
+          </div>
+          <div>
+            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40 block mb-1">Base URL</label>
+            <input type="url" id="provider-url-input" placeholder="http://localhost:11434" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+          </div>
+          <div>
+            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40 block mb-1">API Key</label>
+            <input type="password" id="provider-key-input" placeholder="sk-..." class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+          </div>
+          <div>
+            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40 block mb-1">Default Model</label>
+            <input type="text" id="provider-model-input" placeholder="llama3.2" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+          </div>
+          <button id="save-provider-btn" class="w-full bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 text-[0.65rem] font-black uppercase tracking-widest py-3 rounded-xl hover:opacity-90 active:scale-95 transition-all">Save Provider</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Custom JS -->
+    <script src="js/provider-manager.js"></script>
+    <script src="js/stream-parser.js"></script>
+    <script src="js/providers/_adapter.js"></script>
+    <script src="js/providers/ollama.js"></script>
+    <script src="js/providers/openai.js"></script>
+    <script src="js/providers/anthropic.js"></script>
     <script src="script.js"></script>
   </body>
 </html>

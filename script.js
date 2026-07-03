@@ -5,6 +5,7 @@ $(document).ready(function () {
   const $userInput = $("#user-input");
   const $themeToggle = $("#theme-toggle");
   const $modelSelect = $("#model-select");
+  const $providerSelect = $("#provider-select");
   const $thinkConfig = $("#thinking-config");
   const $thinkToggle = $("#think-toggle");
   const $thinkLevel = $("#think-level");
@@ -45,7 +46,178 @@ $(document).ready(function () {
   const $saveSysPrompt = $("#save-system-prompt");
   const $closeSysPrompt = $("#close-system-prompt");
 
-  const OLLAMA_BASE_URL = "http://localhost:11434";
+  // ── Provider Helpers ──────────────────────────────
+  function getActiveProvider() {
+    if (window.AetherApp && window.AetherApp.providers) {
+      return window.AetherApp.providers.getActiveProvider();
+    }
+    return { id: "ollama-local", name: "Ollama Local", type: "ollama", baseUrl: "http://localhost:11434", apiKey: "" };
+  }
+  function getActiveBaseUrl() {
+    return getActiveProvider().baseUrl.replace(/\/+$/, "");
+  }
+  function getActiveApiKey() {
+    return getActiveProvider().apiKey || "";
+  }
+
+  // ── Provider Select & Management ─────────────────
+  function populateProviderSelect() {
+    var providers = [];
+    if (window.AetherApp && window.AetherApp.providers) {
+      providers = window.AetherApp.providers.loadProviders();
+    }
+    var activeId = window.AetherApp ? window.AetherApp.providers.getActiveProviderId() : 'ollama-local';
+    var currentVal = $providerSelect.val() || activeId;
+    $providerSelect.empty();
+    providers.forEach(function(p) {
+      var typeLabel = window.AetherApp && window.AetherApp.providers
+        ? window.AetherApp.providers.getProviderTypeLabel(p.type)
+        : p.type;
+      var label = p.name + ' (' + typeLabel + ')';
+      $('<option>').val(p.id).text(label).appendTo($providerSelect);
+    });
+    if (providers.length > 0) {
+      $providerSelect.val(providers.some(function(p) { return p.id === currentVal; }) ? currentVal : providers[0].id);
+    }
+  }
+
+  function switchProvider(providerId) {
+    if (window.AetherApp && window.AetherApp.providers) {
+      window.AetherApp.providers.setActiveProviderId(providerId);
+    }
+    populateProviderSelect();
+    fetchModels();
+    renderProviderList();
+  }
+
+  function renderProviderList() {
+    var $list = $('#provider-list');
+    if (!$list.length) return;
+    var providers = window.AetherApp ? window.AetherApp.providers.loadProviders() : [];
+    var activeId = window.AetherApp ? window.AetherApp.providers.getActiveProviderId() : '';
+    $list.empty();
+    providers.forEach(function(p) {
+      var typeLabel = window.AetherApp && window.AetherApp.providers
+        ? window.AetherApp.providers.getProviderTypeLabel(p.type)
+        : p.type;
+      var isActive = p.id === activeId;
+      var statusColor = 'bg-green-500'; // Connected status (simplified, could add ping check)
+      var activeBadge = isActive ? '<span class="text-[0.45rem] font-black uppercase tracking-widest text-green-600 dark:text-green-400 ml-2">Active</span>' : '';
+      var card = $('<div class="flex items-center justify-between p-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl transition-all">' +
+        '<div class="flex items-center gap-2 min-w-0">' +
+          '<div class="w-2 h-2 rounded-full flex-shrink-0 ' + statusColor + '"></div>' +
+          '<div class="flex flex-col min-w-0">' +
+            '<div class="flex items-center gap-1">' +
+              '<span class="text-[0.6rem] font-black uppercase tracking-wider truncate">' + escapeHtml(p.name) + '</span>' +
+              activeBadge +
+            '</div>' +
+            '<span class="text-[0.5rem] font-bold text-zinc-400 uppercase tracking-wider truncate">' + escapeHtml(typeLabel) + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="flex items-center gap-1 flex-shrink-0">' +
+          (isActive ? '' : '<button class="provider-set-active p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" data-id="' + escapeHtml(p.id) + '" title="Set active"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg></button>') +
+          '<button class="provider-edit p-1.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors" data-id="' + escapeHtml(p.id) + '" title="Edit"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg></button>' +
+          '<button class="provider-delete p-1.5 text-zinc-400 hover:text-red-500 transition-colors" data-id="' + escapeHtml(p.id) + '" title="Delete"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg></button>' +
+        '</div>' +
+      '</div>');
+      $list.append(card);
+    });
+  }
+
+  function openProviderModal(provider) {
+    var $modal = $('#provider-modal');
+    var $title = $('#provider-modal-title');
+    var $idInput = $('#provider-edit-id');
+    var $nameInput = $('#provider-name-input');
+    var $typeInput = $('#provider-type-input');
+    var $urlInput = $('#provider-url-input');
+    var $keyInput = $('#provider-key-input');
+    var $modelInput = $('#provider-model-input');
+
+    if (provider) {
+      $title.text('Edit Provider');
+      $idInput.val(provider.id);
+      $nameInput.val(provider.name);
+      $typeInput.val(provider.type);
+      $urlInput.val(provider.baseUrl);
+      $keyInput.val(provider.apiKey || '');
+      $modelInput.val(provider.defaultModel || '');
+    } else {
+      $title.text('Add Provider');
+      $idInput.val('');
+      $nameInput.val('');
+      $typeInput.val('ollama');
+      $urlInput.val('http://localhost:11434');
+      $keyInput.val('');
+      $modelInput.val('');
+    }
+    $modal.removeClass('hidden').addClass('flex');
+    $nameInput.focus();
+  }
+
+  function saveProviderForm() {
+    var $idInput = $('#provider-edit-id');
+    var id = $idInput.val();
+    var name = $('#provider-name-input').val().trim();
+    var type = $('#provider-type-input').val();
+    var baseUrl = $('#provider-url-input').val().trim();
+    var apiKey = $('#provider-key-input').val().trim();
+    var defaultModel = $('#provider-model-input').val().trim();
+
+    if (!name) { showToast('Provider name is required', 'error'); return; }
+    if (!baseUrl) { showToast('Base URL is required', 'error'); return; }
+
+    if (!window.AetherApp || !window.AetherApp.providers) {
+      showToast('Provider system not available', 'error');
+      return;
+    }
+
+    if (id) {
+      // Edit mode
+      window.AetherApp.providers.updateProvider(id, {
+        name: name,
+        type: type,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        defaultModel: defaultModel
+      });
+    } else {
+      // Add mode
+      var newId = 'provider-' + Date.now();
+      var providerTypes = window.AetherApp.providers.PROVIDER_TYPES;
+      var typeDef = providerTypes[type];
+      window.AetherApp.providers.addProvider({
+        id: newId,
+        name: name,
+        type: type,
+        baseUrl: baseUrl,
+        apiKey: apiKey,
+        defaultModel: defaultModel,
+        isActive: false,
+        config: typeDef ? Object.assign({}, typeDef.defaultConfig) : {}
+      });
+    }
+
+    $('#provider-modal').addClass('hidden').removeClass('flex');
+    populateProviderSelect();
+    renderProviderList();
+  }
+
+  function deleteProviderConfirm(id) {
+    if (!window.AetherApp || !window.AetherApp.providers) return;
+    var providers = window.AetherApp.providers.loadProviders();
+    var p = providers.find(function(p) { return p.id === id; });
+    if (!p) return;
+    if (!confirm('Delete provider "' + p.name + '"?')) return;
+    window.AetherApp.providers.removeProvider(id);
+    populateProviderSelect();
+    renderProviderList();
+    fetchModels();
+  }
+
+  function setActiveProvider(id) {
+    switchProvider(id);
+  }
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -64,8 +236,8 @@ $(document).ready(function () {
   }
 
   // --- State ---
-  let chats = JSON.parse(localStorage.getItem("ollama_chats")) || [];
-  let currentChatId = localStorage.getItem("ollama_current_chat_id") || null;
+  let chats = JSON.parse(localStorage.getItem("aether_chats")) || [];
+  let currentChatId = localStorage.getItem("aether_current_chat_id") || null;
   let activeContext = []; // Stores objects like { type: 'file'|'link', name: string, content: string }
   let currentAbortController = null;
   let thinkModels = [
@@ -77,15 +249,15 @@ $(document).ready(function () {
   ];
 
   // Config State
-  let showMetrics = localStorage.getItem("ollama_show_metrics") === "true";
-  let toolsEnabled = localStorage.getItem("ollama_tools_enabled") !== "false"; // Default to true
-  let webSearchEnabled = localStorage.getItem("ollama_web_search") === "true";
-  let jinaApiKey = localStorage.getItem("ollama_jina_key") || "";
-  let searchProvider = localStorage.getItem("ollama_search_provider") || "jina";
-  let searxngUrl = localStorage.getItem("ollama_searxng_url") || "http://172.17.0.1:8080";
-  let customSystemPrompt = localStorage.getItem("ollama_system_prompt") || "You are a professional AI assistant. Don't use emoji. Aim for clarity and depth. If a document is provided, use it as your primary source.";
+  let showMetrics = localStorage.getItem("aether_show_metrics") === "true";
+  let toolsEnabled = localStorage.getItem("aether_tools_enabled") !== "false"; // Default to true
+  let webSearchEnabled = localStorage.getItem("aether_web_search") === "true";
+  let jinaApiKey = localStorage.getItem("aether_jina_key") || "";
+  let searchProvider = localStorage.getItem("aether_search_provider") || "jina";
+  let searxngUrl = localStorage.getItem("aether_searxng_url") || "http://172.17.0.1:8080";
+  let customSystemPrompt = localStorage.getItem("aether_system_prompt") || "You are a professional AI assistant. Don't use emoji. Aim for clarity and depth. If a document is provided, use it as your primary source.";
 
-  let configParams = JSON.parse(localStorage.getItem("ollama_config_params")) || {
+  let configParams = JSON.parse(localStorage.getItem("aether_config_params")) || {
     temperature: 0.7,
     num_ctx: 16384,
     top_p: 0.9,
@@ -100,6 +272,7 @@ $(document).ready(function () {
     if (currentChatId) {
       loadChat(currentChatId);
     }
+    populateProviderSelect();
     fetchModels();
     checkTheme();
     configureMarked();
@@ -127,37 +300,108 @@ $(document).ready(function () {
 
   // --- Model Fetching ---
   async function fetchModels() {
+    const provider = getActiveProvider();
+    const baseUrl = getActiveBaseUrl();
+    const apiKey = getActiveApiKey();
+
     try {
-      const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
-      const data = await response.json();
+      let models = [];
+      if (window.AetherApp && window.AetherApp.adapters && window.AetherApp.adapters[provider.type]) {
+        const adapter = window.AetherApp.adapters[provider.type];
+        models = await adapter.fetchModels(baseUrl, apiKey);
+      } else if (provider.type === 'ollama') {
+        const response = await fetch(baseUrl + '/api/tags');
+        const data = await response.json();
+        models = (data.models || []).map(function(m) { return { name: m.name }; });
+      } else if (provider.type === 'openai') {
+        const response = await fetch(baseUrl + '/models', {
+          headers: apiKey ? { 'Authorization': 'Bearer ' + apiKey } : {}
+        });
+        if (response.ok) {
+          const data = await response.json();
+          models = (data.data || []).filter(function(m) { return m.id && m.object === 'model'; }).map(function(m) { return { name: m.id }; });
+        }
+      }
 
       const prevVal = $modelSelect.val();
       $modelSelect.empty();
-      if (data.models && data.models.length > 0) {
-        data.models.forEach((model) => {
-          const name = model.name;
-          $("<option>").val(name).text(name).appendTo($modelSelect);
+      if (models.length > 0) {
+        models.forEach(function(model) {
+          $('<option>').val(model.name).text(model.name).appendTo($modelSelect);
         });
-        if (prevVal) $modelSelect.val(prevVal);
+        if (prevVal && $modelSelect.find('option[value="' + CSS.escape(prevVal) + '"]').length) {
+          $modelSelect.val(prevVal);
+        }
       } else {
         $modelSelect.append('<option value="">No Models</option>');
       }
       updateThinkUIVisibility();
     } catch (error) {
+      console.error("fetchModels error:", error);
       $modelSelect.empty().append('<option value="">Offline</option>');
     }
   }
 
   function updateThinkUIVisibility() {
     const model = $modelSelect.val() || "";
-    const isThinkModel = thinkModels.some((m) =>
-      model.toLowerCase().includes(m),
-    );
+    const provider = getActiveProvider();
+    var isThinkModel = false;
+    if (window.AetherApp && window.AetherApp.adapters && window.AetherApp.adapters[provider.type]) {
+      var adapter = window.AetherApp.adapters[provider.type];
+      if (adapter.isThinkModel) isThinkModel = adapter.isThinkModel(model);
+    }
     if (isThinkModel) $thinkConfig.removeClass("hidden").addClass("flex");
     else $thinkConfig.addClass("hidden").removeClass("flex");
   }
 
   $modelSelect.on("change", updateThinkUIVisibility);
+
+  // ── Provider Event Handlers ──
+  $providerSelect.on("change", function() {
+    switchProvider($(this).val());
+  });
+
+  // Provider management: Add button
+  $(document).on("click", "#add-provider-btn", function() {
+    openProviderModal(null);
+  });
+
+  // Provider management: Edit button
+  $(document).on("click", ".provider-edit", function() {
+    var id = $(this).data("id");
+    if (!window.AetherApp || !window.AetherApp.providers) return;
+    var p = window.AetherApp.providers.getProviderById(id);
+    if (p) openProviderModal(p);
+  });
+
+  // Provider management: Delete button
+  $(document).on("click", ".provider-delete", function() {
+    deleteProviderConfirm($(this).data("id"));
+  });
+
+  // Provider management: Set active button
+  $(document).on("click", ".provider-set-active", function() {
+    setActiveProvider($(this).data("id"));
+  });
+
+  // Provider modal: Save
+  $(document).on("click", "#save-provider-btn", saveProviderForm);
+
+  // Provider modal: Close
+  $(document).on("click", "#close-provider-modal", function() {
+    $("#provider-modal").addClass("hidden").removeClass("flex");
+  });
+
+  // Provider modal: Close on backdrop click
+  $(document).on("click", "#provider-modal", function(e) {
+    if (e.target === this) $(this).addClass("hidden").removeClass("flex");
+  });
+
+  // ── Provider management in settings — render when settings opens
+  $settingsBtn.on("click", function() {
+    renderProviderList();
+    $settingsModal.removeClass("hidden").addClass("flex");
+  });
 
   // --- Context Managers (RAG & Link Analysis) ---
   $attachBtn.on("click", () => $fileUpload.click());
@@ -298,7 +542,7 @@ $(document).ready(function () {
 
   function loadChat(id) {
     currentChatId = id;
-    localStorage.setItem("ollama_current_chat_id", id);
+    localStorage.setItem("aether_current_chat_id", id);
     const chat = chats.find((c) => c.id === id);
     if (!chat) return;
     activeContext = [];
@@ -323,7 +567,7 @@ $(document).ready(function () {
   }
 
   function saveChats() {
-    localStorage.setItem("ollama_chats", JSON.stringify(chats));
+    localStorage.setItem("aether_chats", JSON.stringify(chats));
   }
 
   function renderChatList() {
@@ -698,7 +942,6 @@ $(document).ready(function () {
   }
 
   // --- UI Event Handlers ---
-  $settingsBtn.on("click", () => $settingsModal.removeClass("hidden").addClass("flex"));
   $closeSettings.on("click", () => $settingsModal.addClass("hidden").removeClass("flex"));
 
   $saveSettings.on("click", () => {
@@ -715,13 +958,13 @@ $(document).ready(function () {
       top_p: parseFloat($topPInput.val()),
       top_k: parseInt($topKInput.val())
     };
-    localStorage.setItem("ollama_show_metrics", showMetrics);
-    localStorage.setItem("ollama_tools_enabled", toolsEnabled);
-    localStorage.setItem("ollama_web_search", webSearchEnabled);
-    localStorage.setItem("ollama_jina_key", jinaApiKey);
-    localStorage.setItem("ollama_search_provider", searchProvider);
-    localStorage.setItem("ollama_searxng_url", searxngUrl);
-    localStorage.setItem("ollama_config_params", JSON.stringify(configParams));
+    localStorage.setItem("aether_show_metrics", showMetrics);
+    localStorage.setItem("aether_tools_enabled", toolsEnabled);
+    localStorage.setItem("aether_web_search", webSearchEnabled);
+    localStorage.setItem("aether_jina_key", jinaApiKey);
+    localStorage.setItem("aether_search_provider", searchProvider);
+    localStorage.setItem("aether_searxng_url", searxngUrl);
+    localStorage.setItem("aether_config_params", JSON.stringify(configParams));
     if (currentChatId) loadChat(currentChatId);
     $settingsModal.addClass("hidden").removeClass("flex");
   });
@@ -780,7 +1023,7 @@ $(document).ready(function () {
     var newPrompt = $sysPromptInput.val().trim();
     if (newPrompt) {
       customSystemPrompt = newPrompt;
-      localStorage.setItem("ollama_system_prompt", customSystemPrompt);
+      localStorage.setItem("aether_system_prompt", customSystemPrompt);
       showToast("System prompt updated", "success");
     }
     $sysPromptModal.addClass("hidden").removeClass("flex");
@@ -794,7 +1037,7 @@ $(document).ready(function () {
     var url = URL.createObjectURL(blob);
     var a = document.createElement("a");
     a.href = url;
-    a.download = "ollama-chats-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.download = "aether-chats-" + new Date().toISOString().slice(0, 10) + ".json";
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -993,7 +1236,7 @@ $(document).ready(function () {
       let isLooping = true;
       while (isLooping) {
         let toolCallsInPass = [];
-        const response = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+        const response = await fetch(getActiveBaseUrl() + '/api/chat', {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: currentAbortController.signal,
