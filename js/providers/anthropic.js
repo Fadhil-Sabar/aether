@@ -80,11 +80,17 @@
           // Handle tool calls in assistant messages
           if (msg.tool_calls) {
             msg.tool_calls.forEach(function (tc) {
+              var input = {};
+              if (tc.function.arguments) {
+                input = typeof tc.function.arguments === "string"
+                  ? JSON.parse(tc.function.arguments)
+                  : tc.function.arguments;
+              }
               content.push({
                 type: "tool_use",
                 id: tc.id || tc.function.name,
                 name: tc.function.name,
-                input: tc.function.arguments ? JSON.parse(tc.function.arguments) : {},
+                input: input,
               });
             });
           }

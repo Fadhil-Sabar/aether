@@ -203,6 +203,7 @@
   // Handles: content_block_delta (text/thinking), message_stop, etc.
   function createAnthropicParser() {
     let buffer = "";
+    let pendingToolCalls = {};
 
     function parseChunk(chunk, flush) {
       chunk = chunk || "";
@@ -262,23 +263,60 @@
                 json.delta.thinking
               ) {
                 result.thinking += json.delta.thinking;
+              } else if (
+                json.delta.type === "input_json_delta" &&
+                json.delta.partial_json != null
+              ) {
+                // Accumulate partial JSON for tool use
+                var idx = json.index != null ? json.index : 0;
+                if (!pendingToolCalls[idx]) {
+                  pendingToolCalls[idx] = { inputJson: "" };
+                }
+                pendingToolCalls[idx].inputJson += json.delta.partial_json;
               }
-              // input_json_delta for tool use — not extracting partial JSON
             }
             break;
 
           case "content_block_start":
-            if (
-              json.content_block &&
-              json.content_block.type === "text" &&
-              json.content_block.text
-            ) {
-              result.text += json.content_block.text;
+            if (json.content_block) {
+              if (json.content_block.type === "text" && json.content_block.text) {
+                result.text += json.content_block.text;
+              } else if (json.content_block.type === "tool_use") {
+                // Start tracking a tool call
+                var idx = json.index != null ? json.index : 0;
+                pendingToolCalls[idx] = {
+                  id: json.content_block.id || "",
+                  name: json.content_block.name || "",
+                  inputJson: "",
+                };
+              }
             }
             break;
 
           case "content_block_stop":
-            // Marker only — no content
+            // Finalize tool call if pending at this index
+            var stopIdx = json.index != null ? json.index : 0;
+            if (pendingToolCalls[stopIdx]) {
+              var tc = pendingToolCalls[stopIdx];
+              var input = {};
+              if (tc.inputJson) {
+                try {
+                  input = JSON.parse(tc.inputJson);
+                } catch (e) {
+                  console.warn("[AnthropicParser] Failed to parse tool input JSON:", tc.inputJson, e);
+                  input = {};
+                }
+              }
+              result.toolCalls.push({
+                id: tc.id,
+                type: "function",
+                function: {
+                  name: tc.name,
+                  arguments: JSON.stringify(input),
+                },
+              });
+              delete pendingToolCalls[stopIdx];
+            }
             break;
 
           case "message_delta":
@@ -299,6 +337,29 @@
 
           case "message_stop":
             result.done = true;
+            // Flush any remaining pending tool calls
+            Object.keys(pendingToolCalls).forEach(function (key) {
+              var tc = pendingToolCalls[key];
+              if (tc && tc.name) {
+                var input = {};
+                if (tc.inputJson) {
+                  try {
+                    input = JSON.parse(tc.inputJson);
+                  } catch (e) {
+                    input = {};
+                  }
+                }
+                result.toolCalls.push({
+                  id: tc.id,
+                  type: "function",
+                  function: {
+                    name: tc.name,
+                    arguments: JSON.stringify(input),
+                  },
+                });
+              }
+              delete pendingToolCalls[key];
+            });
             break;
 
           case "message_start":
@@ -321,6 +382,7 @@
 
     function reset() {
       buffer = "";
+      pendingToolCalls = {};
     }
 
     return { parseChunk: parseChunk, reset: reset };

@@ -131,7 +131,7 @@
     if (enabled) {
       localStorage.setItem(KEYS.rememberApiKeys, "true");
     } else {
-      localStorage.removeItem(KEYS.rememberApiKeys);
+      localStorage.setItem(KEYS.rememberApiKeys, "false");
     }
   }
 
@@ -285,7 +285,53 @@
     }) || null;
   }
 
+  // ── Base URL Validation ─────────────────────────────────
+  /**
+   * Validate and sanitize a provider base URL.
+   * Returns { valid: boolean, sanitized?: string, error?: string, warning?: string }
+   *
+   * - Checks scheme is http:// or https://
+   * - Strips embedded credentials (user:pass@)
+   * - Warns if host is unusual (not local/private/common API)
+   */
+  function validateBaseUrl(url) {
+    if (!url || typeof url !== "string") {
+      return { valid: false, error: "Base URL is required" };
+    }
+    url = url.trim();
+
+    if (!/^https?:\/\//i.test(url)) {
+      return { valid: false, error: "Base URL must start with http:// or https://" };
+    }
+
+    // Strip credentials (user:pass@) — keep scheme intact
+    var sanitized = url.replace(/^(https?:\/\/)[^@]+@/, "$1");
+
+    // Warn about unusual hostnames
+    var warning = null;
+    try {
+      var hostname = new URL(sanitized).hostname;
+      var isLocal = /^(localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0)$/i.test(hostname);
+      var isPrivate = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname);
+      var isCommonAPI = /(openai\.com|anthropic\.com|googleapis\.com|azure\.com|aws\.com|github\.com|huggingface\.co)$/i.test(hostname);
+
+      if (!isLocal && !isPrivate && !isCommonAPI) {
+        warning = 'Warning: Host "' + hostname + '" is not a common API endpoint. Verify this URL is correct.';
+      }
+    } catch (e) {
+      return { valid: false, error: "Invalid URL format" };
+    }
+
+    return { valid: true, sanitized: sanitized, warning: warning };
+  }
+
   function addProvider(providerConfig) {
+    if (providerConfig && providerConfig.baseUrl) {
+      var result = validateBaseUrl(providerConfig.baseUrl);
+      if (result.valid) {
+        providerConfig.baseUrl = result.sanitized;
+      }
+    }
     const providers = loadProviders();
     providers.push(providerConfig);
     saveProviders(providers);
@@ -293,6 +339,12 @@
   }
 
   function updateProvider(id, updates) {
+    if (updates && updates.baseUrl) {
+      var result = validateBaseUrl(updates.baseUrl);
+      if (result.valid) {
+        updates.baseUrl = result.sanitized;
+      }
+    }
     const providers = loadProviders();
     var found = false;
     providers.forEach(function (p, i) {
@@ -388,6 +440,7 @@
     setActiveProviderId: setActiveProviderId,
     getActiveProvider: getActiveProvider,
     getProviderById: getProviderById,
+    validateBaseUrl: validateBaseUrl,
     addProvider: addProvider,
     updateProvider: updateProvider,
     removeProvider: removeProvider,

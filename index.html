@@ -4,11 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Aether</title>
-    <!-- Inter Font from Google -->
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap"
-      rel="stylesheet"
-    />
+    <!-- Local Fonts -->
+    <link href="fonts/fonts.css" rel="stylesheet" />
     <!-- Vendored Assets (SRI pinned) -->
     <script src="js/vendor/tailwind.min.js"></script>
     <link rel="stylesheet" href="style.css" />
@@ -208,10 +205,10 @@
     </div>
 
     <!-- Settings Modal -->
-    <div id="settings-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/20 dark:bg-zinc-950/60 backdrop-blur-sm transition-all animate-in fade-in duration-200">
+    <div id="settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/20 dark:bg-zinc-950/60 backdrop-blur-sm transition-all animate-in fade-in duration-200">
         <div class="bg-white dark:bg-zinc-900 w-[90%] max-w-md rounded-2xl p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in zoom-in duration-200">
             <div class="flex items-center justify-between mb-6">
-                <h3 class="text-xs font-black uppercase tracking-widest text-zinc-400">Parameter Studio</h3>
+                <h3 id="settings-modal-title" class="text-xs font-black uppercase tracking-widest text-zinc-400">Parameter Studio</h3>
                 <button id="close-settings" class="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors">
                     <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
@@ -227,8 +224,26 @@
                     </select>
                 </div>
 
-                <!-- Provider Config Section (rendered by JS) -->
+                <!-- Provider Config Section -->
                 <div id="provider-config-section" class="space-y-4 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+                    <div class="grid grid-cols-2 gap-3">
+                        <div class="space-y-1.5">
+                            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40">Temperature</label>
+                            <input type="number" id="temp-input" step="0.1" min="0" max="2" value="0.7" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40">Context (num_ctx)</label>
+                            <input type="number" id="ctx-input" step="1024" min="1024" max="131072" value="16384" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40">Top P</label>
+                            <input type="number" id="top-p-input" step="0.05" min="0" max="1" value="0.9" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-[0.55rem] font-black uppercase tracking-widest opacity-40">Top K</label>
+                            <input type="number" id="top-k-input" step="1" min="0" max="200" value="40" class="w-full bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 text-xs font-bold outline-none transition-all">
+                        </div>
+                    </div>
                 </div>
 
                 <!-- Metrics Toggle -->
@@ -339,10 +354,10 @@
     <div id="toast-container" class="fixed bottom-24 right-6 z-[100] flex flex-col gap-3 pointer-events-none"></div>
 
     <!-- System Prompt Edit Modal -->
-    <div id="system-prompt-modal" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/20 dark:bg-zinc-950/60 backdrop-blur-sm transition-all">
+    <div id="system-prompt-modal" role="dialog" aria-modal="true" aria-labelledby="sys-prompt-modal-title" class="hidden fixed inset-0 z-[60] flex items-center justify-center bg-zinc-950/20 dark:bg-zinc-950/60 backdrop-blur-sm transition-all">
       <div class="bg-white dark:bg-zinc-900 w-[90%] max-w-lg rounded-2xl p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800">
         <div class="flex items-center justify-between mb-4">
-          <h3 class="text-xs font-black uppercase tracking-widest text-zinc-400">System Prompt</h3>
+          <h3 id="sys-prompt-modal-title" class="text-xs font-black uppercase tracking-widest text-zinc-400">System Prompt</h3>
           <button id="close-system-prompt" class="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
@@ -394,6 +409,7 @@
     </div>
 
     <!-- Custom JS -->
+    <script src="js/db.js"></script>
     <script src="js/provider-manager.js"></script>
     <script src="js/stream-parser.js"></script>
     <script src="js/state-storage.js"></script>

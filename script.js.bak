@@ -27,6 +27,10 @@ $(document).ready(function () {
   const $settingsModal = $("#settings-modal");
   const $closeSettings = $("#close-settings");
   const $saveSettings = $("#save-settings");
+  const $tempInput = $("#temp-input");
+  const $ctxInput = $("#ctx-input");
+  const $topPInput = $("#top-p-input");
+  const $topKInput = $("#top-k-input");
   const $showMetricsToggle = $("#show-metrics-toggle");
   const $toolsEnabledToggle = $("#tools-enabled-toggle");
   const $webSearchToggle = $("#web-search-toggle");
@@ -542,10 +546,27 @@ $(document).ready(function () {
   $settingsBtn.on("click", function() {
     renderProviderList();
     $sysPromptInput.val(customSystemPrompt);
-    openModal($settingsModal);
+    $settingsModal.removeClass("hidden").addClass("flex");
   });
 
   // ── URL Security & SSRF Protection ──────────────────────
+  function isPrivateOrLocalHostname(hostname) {
+    var host = String(hostname || "").toLowerCase().replace(/^\[|\]$/g, "");
+    if (!host) return true;
+
+    // Direct hostname matches
+    if (host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local")) return true;
+    if (host === "::1" || host === "::" || host.startsWith("fe80:") || host.startsWith("fc") || host.startsWith("fd")) return true;
+
+    // IPv4-mapped IPv6: ::ffff:192.168.x.x or ::ffff:127.x.x.x
+    var v4mapped = host.match(/^::(?:ffff:)?(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+    if (v4mapped) {
+      host = v4mapped[1] + "." + v4mapped[2] + "." + v4mapped[3] + "." + v4mapped[4];
+    }
+
+    // IPv4 private ranges (also covers IPv4-mapped extracted above)
+    if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return true;
+    // ── URL Security & SSRF Protection ──────────────────────
     // ── IP parsing helpers ──
 
     /**
@@ -912,7 +933,7 @@ $(document).ready(function () {
       var chat = chats.find(function(c) { return c.id === currentChatId; });
       if (chat) {
         chat.context = activeContext.slice();
-        persistChat(chat);
+        saveChats();
       }
     }
   }
@@ -1011,20 +1032,15 @@ $(document).ready(function () {
   }
 
   function saveChats() {
+    // Primary: IndexedDB (async)
     if (window.AetherDB && window.AetherDB.isReady()) {
       window.AetherDB.saveAllChats(chats).catch(function(err) {
-        console.warn("IndexedDB saveAllChats failed:", err);
+        console.warn("IndexedDB saveAllChats failed, falling back to localStorage:", err);
+        localStorage.setItem("aether_chats", JSON.stringify(chats));
       });
     }
-  }
-
-  /** Save a single chat (optimized — no clear+putAll) */
-  function persistChat(chat) {
-    if (window.AetherDB && window.AetherDB.isReady()) {
-      window.AetherDB.saveChat(chat).catch(function(err) {
-        console.warn("IndexedDB saveChat failed:", err);
-      });
-    }
+    // Backup: localStorage (sync, for compatibility & next boot fast-load)
+    localStorage.setItem("aether_chats", JSON.stringify(chats));
   }
 
   function renderChatList() {
@@ -1047,11 +1063,7 @@ $(document).ready(function () {
   function deleteChat(id) {
     if (confirm("Delete this thread permanently?")) {
       chats = chats.filter((c) => c.id !== id);
-      if (window.AetherDB && window.AetherDB.isReady()) {
-        window.AetherDB.deleteChat(id).catch(function(err) {
-          console.warn("IndexedDB deleteChat failed:", err);
-        });
-      }
+      saveChats();
       if (currentChatId === id) {
         if (chats.length > 0) loadChat(chats[0].id);
         else createNewChat();
@@ -1065,7 +1077,7 @@ $(document).ready(function () {
     const newTitle = prompt("New Thread Name:", chat.title);
     if (newTitle && newTitle.trim()) {
       chat.title = newTitle.trim();
-      persistChat(chat);
+      saveChats();
       renderChatList();
       if (currentChatId === id) $currentChatTitle.text(chat.title);
     }
@@ -1407,7 +1419,7 @@ $(document).ready(function () {
   }
 
   // --- UI Event Handlers ---
-  $closeSettings.on("click", () => closeModal($settingsModal));
+  $closeSettings.on("click", () => $settingsModal.addClass("hidden").removeClass("flex"));
 
   // Remember API Keys toggle
   $rememberKeysToggle.on("change", function() {
@@ -1429,22 +1441,16 @@ $(document).ready(function () {
     searchProvider = $providerSearxng.is(":checked") ? "searxng" : "jina";
     searxngUrl = $searxngUrlInput.val().trim() || "http://172.17.0.1:8080";
 
-    // Read config from provider config (chat-controller.js already saved it to provider)
-    if (window.AetherApp && window.AetherApp.providers) {
-      var activeProv = window.AetherApp.providers.getActiveProvider();
-      configParams = activeProv && activeProv.config ? JSON.parse(JSON.stringify(activeProv.config)) : configParams;
-    } else {
-      // Fallback: read from dynamic #pfield-* fields if available
-      configParams = {
-        temperature: parseFloat($("#pfield-temperature").val() || configParams.temperature),
-        num_ctx: parseInt($("#pfield-num_ctx").val() || configParams.num_ctx),
-        top_p: parseFloat($("#pfield-top_p").val() || configParams.top_p),
-        top_k: parseInt($("#pfield-top_k").val() || configParams.top_k)
-      };
-    }
+    configParams = {
+      temperature: parseFloat($tempInput.val()),
+      num_ctx: parseInt($ctxInput.val()),
+      top_p: parseFloat($topPInput.val()),
+      top_k: parseInt($topKInput.val())
+    };
     localStorage.setItem("aether_show_metrics", showMetrics);
     localStorage.setItem("aether_tools_enabled", toolsEnabled);
     localStorage.setItem("aether_web_search", webSearchEnabled);
+    localStorage.setItem("aether_jina_key", jinaApiKey);
     localStorage.setItem("aether_search_provider", searchProvider);
     localStorage.setItem("aether_searxng_url", searxngUrl);
     // Save remember keys preference
@@ -1461,21 +1467,13 @@ $(document).ready(function () {
       }
       showToast("API keys moved to session-only storage", "warning");
     }
-    // Save Jina key based on remember setting
-    if (rememberKeys) {
-      localStorage.setItem("aether_jina_key", jinaApiKey);
-      sessionStorage.removeItem("aether_jina_key");
-    } else {
-      sessionStorage.setItem("aether_jina_key", jinaApiKey);
-      localStorage.removeItem("aether_jina_key");
-    }
     localStorage.setItem("aether_config_params", JSON.stringify(configParams));
     if (currentChatId) loadChat(currentChatId);
-    closeModal($settingsModal);
+    $settingsModal.addClass("hidden").removeClass("flex");
   });
 
   $settingsModal.on("click", function(e) {
-    if (e.target === this) closeModal($settingsModal);
+    if (e.target === this) $(this).addClass("hidden").removeClass("flex");
   });
 
   const $refModal = $("#reference-modal");
@@ -1506,17 +1504,17 @@ $(document).ready(function () {
 
   // --- System Prompt Modal ---
   $closeSysPrompt.on("click", function() {
-    closeModal($sysPromptModal);
+    $sysPromptModal.addClass("hidden").removeClass("flex");
   });
 
   $sysPromptModal.on("click", function(e) {
-    if (e.target === this) closeModal($sysPromptModal);
+    if (e.target === this) $(this).addClass("hidden").removeClass("flex");
   });
 
   // Long-press on header to edit system prompt
   $currentChatTitle.parent().parent().on("dblclick", function() {
     $sysPromptInput.val(customSystemPrompt);
-    openModal($sysPromptModal);
+    $sysPromptModal.removeClass("hidden").addClass("flex");
   });
 
   $saveSysPrompt.on("click", function() {
@@ -1526,7 +1524,7 @@ $(document).ready(function () {
       localStorage.setItem("aether_system_prompt", customSystemPrompt);
       showToast("System prompt updated", "success");
     }
-    closeModal($sysPromptModal);
+    $sysPromptModal.addClass("hidden").removeClass("flex");
   });
 
   // ── Shape Normalization Helpers ──────────────────────
@@ -1745,9 +1743,6 @@ $(document).ready(function () {
     $stopBtn.removeClass("hidden").show();
     currentAbortController = new AbortController();
     let animationFrameId = null;
-    let lastRenderResponseLen = 0;
-    let lastRenderThinkingLen = 0;
-    let accumulatedHtml = '';
     
     try {
       let displayedResponse = "";
@@ -1775,52 +1770,19 @@ $(document).ready(function () {
           hasNewContent = true;
         }
         if (hasNewContent) {
-          const hasThinkContent = displayedResponse.includes('<think>') || displayedThinking.length > 0;
-          
-          if (hasThinkContent) {
-            // Full re-parse for think-block content (rare — do a full render)
-            const result = formatThinkResponse(displayedResponse, displayedThinking, true);
-            $botMsgContainer.html(result.html);
-            lastRenderResponseLen = displayedResponse.length;
-            lastRenderThinkingLen = displayedThinking.length;
-            accumulatedHtml = '';
-            // Show code generating indicator from full result
-            const $indicatorZone = $botMsgContainer.siblings(".status-indicator-zone");
-            if (result.isGeneratingCode) {
-              if ($indicatorZone.children().length === 0) {
-                $indicatorZone.html(
-                  `<div class="code-generating-indicator"><div class="spinner"></div><span>Generating ${escapeHtml(result.language)}...</span><div class="cursor"></div></div>`,
-                );
-              } else {
-                $indicatorZone.find("span").text(`Generating ${result.language}...`);
-              }
+          const result = formatThinkResponse(displayedResponse, displayedThinking, true);
+          $botMsgContainer.html(result.html);
+          const $indicatorZone = $botMsgContainer.siblings(".status-indicator-zone");
+          if (result.isGeneratingCode) {
+            if ($indicatorZone.children().length === 0) {
+              $indicatorZone.html(
+                `<div class="code-generating-indicator"><div class="spinner"></div><span>Generating ${escapeHtml(result.language)}...</span><div class="cursor"></div></div>`,
+              );
             } else {
-              $indicatorZone.empty();
+              $indicatorZone.find("span").text(`Generating ${result.language}...`);
             }
           } else {
-            // Incremental: parse & append only new chunks — avoids re-parsing full text every frame
-            const newResponseText = displayedResponse.substring(lastRenderResponseLen);
-            if (newResponseText) {
-              const parsed = safeMarkedParse(newResponseText, true);
-              accumulatedHtml += parsed.html;
-              lastRenderResponseLen = displayedResponse.length;
-            }
-            $botMsgContainer.html(accumulatedHtml);
-            
-            // Code generating indicator from full-text fence count
-            const $indicatorZone = $botMsgContainer.siblings(".status-indicator-zone");
-            const fenceCount = (displayedResponse.match(/```/g) || []).length;
-            if (fenceCount % 2 === 1) {
-              if ($indicatorZone.children().length === 0) {
-                const fences = displayedResponse.match(/```(\w*)/g);
-                const lang = fences && fences.length ? fences[fences.length-1].slice(3).toUpperCase() || 'CODE' : 'CODE';
-                $indicatorZone.html(
-                  `<div class="code-generating-indicator"><div class="spinner"></div><span>Generating ${escapeHtml(lang)}...</span><div class="cursor"></div></div>`,
-                );
-              }
-            } else {
-              $indicatorZone.empty();
-            }
+            $indicatorZone.empty();
           }
           if (isAtBottom) {
             $chatArea.scrollTop($chatArea[0].scrollHeight);
@@ -1924,8 +1886,7 @@ $(document).ready(function () {
               const content = await fetchLinkContent(url, { skipConfirm: true });
               messages.push({
                 role: "tool",
-                content: content,
-                tool_call_id: tc.id || tc.tool_call_id || ""
+                content: content
               });
               // Also add to visual context chips for user feedback
               addContext("link", url, content);
@@ -1945,8 +1906,7 @@ $(document).ready(function () {
                                 const parsedResults = searchProvider === "searxng" ? parseSearxngResults(content) : parseJinaSearchResults(content);
                                 messages.push({
                                     role: "tool",
-                                    content: content,
-                                    tool_call_id: tc.id || tc.tool_call_id || ""
+                                    content: content
                                 });
                                 webReferences.push({ 
                                     query: query, 
@@ -1960,9 +1920,6 @@ $(document).ready(function () {
                           localNativeThinking = "";
                           displayedResponse = "";
                           displayedThinking = "";
-                          lastRenderResponseLen = 0;
-                          lastRenderThinkingLen = 0;
-                          accumulatedHtml = "";
                           // Loop again
                         } else {
                           isLooping = false;
