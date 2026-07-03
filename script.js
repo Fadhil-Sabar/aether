@@ -45,6 +45,9 @@ $(document).ready(function () {
   const $sysPromptInput = $("#system-prompt-input");
   const $saveSysPrompt = $("#save-system-prompt");
   const $closeSysPrompt = $("#close-system-prompt");
+  const $rememberKeysToggle = $("#remember-keys-toggle");
+  const $apiKeyWarning = $("#api-key-warning");
+  const $providerKeyStorageNote = $("#provider-key-storage-note");
 
   // ── Provider Helpers ──────────────────────────────
   function getActiveProvider() {
@@ -157,6 +160,12 @@ $(document).ready(function () {
       $keyInput.val('');
       $modelInput.val('');
     }
+    // Show/hide storage note based on remember setting
+    if (rememberKeys) {
+      $providerKeyStorageNote.addClass('hidden');
+    } else {
+      $providerKeyStorageNote.removeClass('hidden');
+    }
     $modal.removeClass('hidden').addClass('flex');
     $nameInput.focus();
   }
@@ -262,6 +271,7 @@ $(document).ready(function () {
   let searchProvider = localStorage.getItem("aether_search_provider") || "jina";
   let searxngUrl = localStorage.getItem("aether_searxng_url") || "http://172.17.0.1:8080";
   let customSystemPrompt = localStorage.getItem("aether_system_prompt") || "You are a professional AI assistant. Don't use emoji. Aim for clarity and depth. If a document is provided, use it as your primary source.";
+  let rememberKeys = window.AetherApp && window.AetherApp.providers ? window.AetherApp.providers.getRememberApiKeys() : true;
 
   let configParams = JSON.parse(localStorage.getItem("aether_config_params")) || {
     temperature: 0.7,
@@ -1006,25 +1016,11 @@ $(document).ready(function () {
     if (!currentChatId) return;
     const chat = chats.find(function(c) { return c.id === currentChatId; });
     if (!chat) return;
-    // Find the message element index
-    const $bubble = $("#" + msgId);
-    const index = $bubble.index() - 1; // Account for welcome screen
-    // Actually, find by iterating
-    let msgIndex = -1;
-    $bubble.siblings(".message-bubble").each(function(i) {
-      if ($(this).attr("id") === msgId) msgIndex = i;
-    });
-    if (msgIndex < 0) {
-      // Find by position: it's the first matching element
-      const allBubbles = $chatArea.find(".message-bubble");
-      allBubbles.each(function(i) {
-        if ($(this).attr("id") === msgId) msgIndex = i;
-      });
-    }
-    if (msgIndex >= 0 && msgIndex < chat.messages.length) {
+    const msgIndex = chat.messages.findIndex(function(m) { return m.id === msgId; });
+    if (msgIndex >= 0) {
       chat.messages.splice(msgIndex, 1);
       saveChats();
-      $bubble.remove();
+      $("#" + msgId).remove();
       showToast("Message deleted", "info");
       if (chat.messages.length === 0) $welcomeScreen.show();
     }
@@ -1035,21 +1031,14 @@ $(document).ready(function () {
     if (!currentChatId) return;
     const chat = chats.find(function(c) { return c.id === currentChatId; });
     if (!chat) return;
-    // Find message index
-    let msgIndex = -1;
-    const allBubbles = $chatArea.find(".message-bubble");
-    allBubbles.each(function(i) {
-      if ($(this).attr("id") === msgId) msgIndex = i;
-    });
-    if (msgIndex < 0 || msgIndex >= chat.messages.length) return;
+    const msgIndex = chat.messages.findIndex(function(m) { return m.id === msgId; });
+    if (msgIndex < 0) return;
     const msg = chat.messages[msgIndex];
     if (!msg.isUser) {
       showToast("Only user messages can be edited", "warning");
       return;
     }
-    // Put the message text in the input field for editing
     $userInput.val(msg.text).trigger("input").focus();
-    // Remove the old message
     chat.messages.splice(msgIndex, 1);
     saveChats();
     $("#" + msgId).remove();
@@ -1079,15 +1068,36 @@ $(document).ready(function () {
     $showMetricsToggle.prop("checked", showMetrics);
     $toolsEnabledToggle.prop("checked", toolsEnabled);
     $webSearchToggle.prop("checked", webSearchEnabled);
+
     $jinaApiKeyInput.val(jinaApiKey);
     if (searchProvider === "jina") $providerJina.prop("checked", true);
     else $providerSearxng.prop("checked", true);
     $searxngUrlInput.val(searxngUrl);
     $sysPromptInput.val(customSystemPrompt);
+    // Remember API Keys
+    rememberKeys = window.AetherApp ? window.AetherApp.providers.getRememberApiKeys() : true;
+    $rememberKeysToggle.prop("checked", rememberKeys);
+    if (rememberKeys) {
+      $apiKeyWarning.addClass("hidden");
+    } else {
+      $apiKeyWarning.removeClass("hidden");
+    }
   }
 
   // --- UI Event Handlers ---
   $closeSettings.on("click", () => $settingsModal.addClass("hidden").removeClass("flex"));
+
+  // Remember API Keys toggle
+  $rememberKeysToggle.on("change", function() {
+    var enabled = $(this).is(":checked");
+    if (enabled) {
+      $apiKeyWarning.addClass("hidden");
+      showToast("API keys will be saved to localStorage", "info");
+    } else {
+      $apiKeyWarning.removeClass("hidden");
+      showToast("API keys will be session-only (cleared on tab close)", "warning");
+    }
+  });
 
   $saveSettings.on("click", () => {
     showMetrics = $showMetricsToggle.is(":checked");
@@ -1109,6 +1119,20 @@ $(document).ready(function () {
     localStorage.setItem("aether_jina_key", jinaApiKey);
     localStorage.setItem("aether_search_provider", searchProvider);
     localStorage.setItem("aether_searxng_url", searxngUrl);
+    // Save remember keys preference
+    var wasRemembering = rememberKeys;
+    rememberKeys = $rememberKeysToggle.is(":checked");
+    if (window.AetherApp && window.AetherApp.providers) {
+      window.AetherApp.providers.setRememberApiKeys(rememberKeys);
+    }
+    // If remember was toggled off, re-save providers to strip apiKeys from localStorage
+    if (wasRemembering && !rememberKeys) {
+      var providers = window.AetherApp ? window.AetherApp.providers.loadProviders() : [];
+      if (window.AetherApp && window.AetherApp.providers) {
+        window.AetherApp.providers.saveProviders(providers);
+      }
+      showToast("API keys moved to session-only storage", "warning");
+    }
     localStorage.setItem("aether_config_params", JSON.stringify(configParams));
     if (currentChatId) loadChat(currentChatId);
     $settingsModal.addClass("hidden").removeClass("flex");
@@ -1169,6 +1193,53 @@ $(document).ready(function () {
     $sysPromptModal.addClass("hidden").removeClass("flex");
   });
 
+  // ── Shape Normalization Helpers ──────────────────────
+  function limitString(value, maxLength, fallback) {
+    if (typeof value !== "string") return fallback || "";
+    return value.slice(0, maxLength);
+  }
+
+  function normalizeStoredString(value, fallback, maxLength) {
+    if (typeof value !== "string") return fallback;
+    var trimmed = value.trim();
+    return trimmed ? trimmed.slice(0, maxLength) : fallback;
+  }
+
+  function ensureMessageShape(message) {
+    var base = message && typeof message === "object" ? message : {};
+    return {
+      id: typeof base.id === "string" && base.id.trim() ? base.id.trim().slice(0, 120) : uid("msg"),
+      text: limitString(base.text, 40000, ""),
+      isUser: Boolean(base.isUser),
+      metrics: base.metrics && typeof base.metrics === "object" ? base.metrics : null,
+      webReferences: Array.isArray(base.webReferences) ? base.webReferences.slice(0, 20) : [],
+    };
+  }
+
+  function ensureChatShape(chat, idx) {
+    var base = chat && typeof chat === "object" ? chat : {};
+    var messages = Array.isArray(base.messages)
+      ? base.messages.slice(0, 500).map(ensureMessageShape)
+      : [];
+    var fallbackId = "imported-chat-" + Date.now() + "-" + (idx || 0);
+    return {
+      id: typeof base.id === "string" && base.id.trim() ? base.id.trim().slice(0, 120) : fallbackId,
+      title: typeof base.title === "string" && base.title.trim()
+        ? base.title.trim().slice(0, 200)
+        : limitString(messages[0] ? messages[0].text : "Untitled", 200, "Untitled"),
+      messages: messages,
+      timestamp: Number.isFinite(Number(base.timestamp)) ? Number(base.timestamp) : Date.now(),
+      context: Array.isArray(base.context) ? base.context.slice(0, 20) : [],
+    };
+  }
+
+  function normalizeImportedChats(rawChats) {
+    if (!Array.isArray(rawChats)) return [];
+    return rawChats.slice(0, 100).map(function(chat, index) {
+      return ensureChatShape(chat, index);
+    });
+  }
+
   // --- Export / Import ---
   $exportBtn.on("click", function() {
     if (chats.length === 0) { showToast("No chats to export", "warning"); return; }
@@ -1206,19 +1277,20 @@ $(document).ready(function () {
           return;
         }
         var data = JSON.parse(raw);
-        if (!data.chats || !Array.isArray(data.chats)) throw new Error("Invalid format");
-        if (data.chats.length > 200) {
-          showToast("Too many chats. Maximum 200.", "error");
-          return;
-        }
+
+        // Use shared normalization from state-storage.js
+        var stateStorage = window.AetherApp && window.AetherApp.stateStorage;
+        if (!stateStorage) throw new Error("State storage module not loaded");
+        var imported = stateStorage.normalizeImportedPayload(data);
+
         // Merge: add imported chats, avoid duplicates by id
         var existingIds = new Set(chats.map(function(c) { return c.id; }));
-        var imported = data.chats.filter(function(c) { return !existingIds.has(c.id); });
-        if (imported.length === 0) { showToast("All chats already exist", "warning"); return; }
-        chats = imported.concat(chats);
+        var newChats = imported.filter(function(c) { return !existingIds.has(c.id); });
+        if (newChats.length === 0) { showToast("All chats already exist", "warning"); return; }
+        chats = newChats.concat(chats);
         saveChats();
         renderChatList();
-        showToast("Imported " + imported.length + " chat(s)", "success");
+        showToast("Imported " + newChats.length + " chat(s)", "success");
       } catch (err) {
         showToast("Import failed: " + err.message, "error");
       }
@@ -1421,6 +1493,9 @@ $(document).ready(function () {
             if (metadata && metadata.metrics) {
               finalMetrics = metadata.metrics;
             }
+            if (metadata && metadata.context) {
+              chat.context = metadata.context;
+            }
           },
         };
 
@@ -1439,12 +1514,22 @@ $(document).ready(function () {
             const $indicatorZone = $botMsgContainer.siblings(".status-indicator-zone");
             if (tc.function.name === "process_link") {
               const url = tc.function.arguments.url;
+              // Confirm before external request
+              var normUrl = normalizeExternalUrl(url);
+              if (!normUrl.ok) {
+                showToast(normUrl.error, "error");
+                continue;
+              }
+              if (!confirmExternalAction("link", normUrl.url, "Jina Reader")) {
+                showToast("Link analysis cancelled by user.", "info");
+                continue;
+              }
               // UI indication
               $indicatorZone.html(
                 `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: process_link(${escapeHtml(url)})</span></div>`
               );
 
-              const content = await fetchLinkContent(url);
+              const content = await fetchLinkContent(url, { skipConfirm: true });
               messages.push({
                 role: "tool",
                 content: content
@@ -1454,10 +1539,16 @@ $(document).ready(function () {
             } else if (tc.function.name === "web_search") {
                                 const query = tc.function.arguments.query;
                                 const providerLabel = searchProvider === "searxng" ? "SearXNG" : "Jina AI";
+                                // Confirm before external request
+                                if (!confirmExternalAction("search", query, providerLabel)) {
+                                    showToast("Web search cancelled by user.", "info");
+                                    continue;
+                                }
                                 $indicatorZone.html(
                                     `<div class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 py-2"><div class="spinner-mini"></div><span>Executing tool: web_search("${escapeHtml(query)}") via ${escapeHtml(providerLabel)}</span></div>`
                                 );
-                                const content = searchProvider === "searxng" ? await fetchSearxngContent(query) : await fetchWebSearchContent(query);
+                                const opts = { skipConfirm: true };
+                                const content = searchProvider === "searxng" ? await fetchSearxngContent(query, opts) : await fetchWebSearchContent(query, opts);
                                 const parsedResults = searchProvider === "searxng" ? parseSearxngResults(content) : parseJinaSearchResults(content);
                                 messages.push({
                                     role: "tool",
