@@ -224,6 +224,7 @@ $(document).ready(function () {
     }
     $modal.removeClass('hidden').addClass('flex');
     $nameInput.focus();
+    openModal($modal);
   }
 
   function saveProviderForm() {
@@ -539,12 +540,12 @@ $(document).ready(function () {
 
   // Provider modal: Close
   $(document).on("click", "#close-provider-modal", function() {
-    $("#provider-modal").addClass("hidden").removeClass("flex");
+    closeModal($("#provider-modal"));
   });
 
   // Provider modal: Close on backdrop click
   $(document).on("click", "#provider-modal", function(e) {
-    if (e.target === this) $(this).addClass("hidden").removeClass("flex");
+    if (e.target === this) closeModal($(this));
   });
 
   // ── Provider management in settings — render when settings opens
