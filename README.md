@@ -1,6 +1,6 @@
-# 🧶 Ollama Interaction: Minimalist Zinc
+# ⚡ Aether: Multi-Provider LLM Chat Interface
 
-A minimalist browser UI for interacting with Ollama. It is privacy-friendly in the sense that chat history stays in your browser, but it is not fully local by default: the app loads several assets from public CDNs and can use external web-search / link-processing services.
+A minimalist browser UI for interacting with multiple LLM providers (Ollama, OpenAI-compatible, and more). Forked from [ollama-interaction](https://github.com/Fadhil-Sabar/ollama-interaction) with flexible provider support. Chat history stays in your browser, but the app is not fully local by default: it loads several frontend assets from public CDNs and can send URLs or search queries to external services when you explicitly approve those requests.
 
 ![Version](https://img.shields.io/badge/version-1.2.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)

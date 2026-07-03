@@ -1,14 +1,14 @@
-# Ollama Interaction: Minimalist Zinc Interface
+# Aether: Multi-Provider AI Interface
 
-A high-performance, private, and minimalist web interface for interacting with local LLMs via Ollama.
+A high-performance, private, and minimalist web interface for interacting with multiple LLM providers (Ollama, OpenAI-compatible, and more).
 
 ## 🚀 Overview
-This project provides a clean, "Zen" style interface for Ollama. It focuses on privacy, speed, and advanced RAG (Retrieval-Augmented Generation) capabilities without requiring a complex backend.
+This project provides a clean, "Zen" style interface for LLMs. It focuses on privacy, speed, and advanced RAG (Retrieval-Augmented Generation) capabilities without requiring a complex backend. Forked from [ollama-interaction](https://github.com/Fadhil-Sabar/ollama-interaction).
 
 ## 🛠 Tech Stack
 - **Frontend**: HTML5, Vanilla CSS, jQuery 3.7.1
 - **Styling**: Tailwind CSS (CDN Integration)
-- **AI Engine**: Ollama (Running on `localhost:11434`)
+- **AI Engine**: Multi-provider support (Ollama, OpenAI-compatible, Anthropic, etc.)
 - **Rendering**: Marked.js for Markdown support
 - **Web Analysis**: Jina Reader (`r.jina.ai`)
 
@@ -28,9 +28,9 @@ This project provides a clean, "Zen" style interface for Ollama. It focuses on p
 
 ### 3. Smart Memory & Tool Loop
 - **Autonomous Execution**: A specialized "Tool Loop" in the frontend handles multi-turn interactions, allowing the model to request data, receive it, and then formulate a final response.
-- **Sliding Window**: The system sends the **last 10 chat bubbles** to Ollama using the `/api/chat` endpoint. This maintains better conversation context while preventing memory bloat.
+- **Sliding Window**: The system sends the **last 10 chat bubbles** to the LLM using the chat API. This maintains better conversation context while preventing memory bloat.
 - **Smart Auto-Scroll**: Intelligent scroll management that only anchors to the bottom if the user is already there, allowing uninterrupted reading of previous messages during generation.
-- **Token Independent**: Memory is managed via text-based history rather than Ollama context tokens for precise control.
+- **Token Independent**: Memory is managed via text-based history rather than context tokens for precise control.
 
 ### 4. Chat Management
 - **Persistence**: Full chat history and settings saved in `LocalStorage`.
@@ -40,12 +40,12 @@ This project provides a clean, "Zen" style interface for Ollama. It focuses on p
 ## 📂 Project Structure
 - `index.html`: Semantic structure and layout.
 - `style.css`: Custom design tokens, transitions, and Zinc theme variables.
-- `script.js`: State management, Ollama API integration, and RAG logic.
+- `script.js`: State management, provider API integration, and RAG logic.
 
 ## 📝 Important Notes for Future Agents
-- **Local Nature**: The app expects Ollama to be running locally with `OLLAMA_ORIGINS="*"` set to allow CORS.
+- **Multi-Provider**: The app supports multiple LLM providers via a provider abstraction layer.
 - **Zero Backend**: All logic is client-side. Do not introduce server-side dependencies (Node.js/Python) unless explicitly requested.
-- **Prompt Engineering**: The prompt structure is hierarchical: 1. Pinned Knowledge, 2. Last 5 Chats, 3. New Instruction.
+- **Prompt Engineering**: The prompt structure is hierarchical: 1. Pinned Knowledge, 2. Last 10 Chats, 3. New Instruction.
 
 ---
-*Documented on April 2026*
+*Forked from ollama-interaction — July 2026*
