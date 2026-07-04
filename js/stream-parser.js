@@ -397,6 +397,8 @@
         return createOpenAIParser();
       case "anthropic":
         return createAnthropicParser();
+      case "opencode-go":
+        return createOpenAIParser();
       default:
         console.warn(
           '[StreamParser] Unknown type "' +

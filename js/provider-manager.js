@@ -43,6 +43,15 @@
         max_tokens: 4096,
       },
     },
+    "opencode-go": {
+      label: "OpenCode Go",
+      defaultBaseUrl: "https://opencode.ai/zen/go/v1",
+      defaultConfig: {
+        temperature: 0.7,
+        max_tokens: 4096,
+        top_p: 0.9,
+      },
+    },
   };
 
   // ── Default Providers ─────────────────────────────────────
@@ -313,7 +322,7 @@
       var hostname = new URL(sanitized).hostname;
       var isLocal = /^(localhost|127\.\d+\.\d+\.\d+|::1|0\.0\.0\.0)$/i.test(hostname);
       var isPrivate = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(hostname);
-      var isCommonAPI = /(openai\.com|anthropic\.com|googleapis\.com|azure\.com|aws\.com|github\.com|huggingface\.co)$/i.test(hostname);
+      var isCommonAPI = /(openai\.com|anthropic\.com|googleapis\.com|opencode\.ai|azure\.com|aws\.com|github\.com|huggingface\.co)$/i.test(hostname);
 
       if (!isLocal && !isPrivate && !isCommonAPI) {
         warning = 'Warning: Host "' + hostname + '" is not a common API endpoint. Verify this URL is correct.';
@@ -390,6 +399,11 @@
     anthropic: [
       { key: 'temperature', label: 'Temperature', type: 'number', step: 0.1, min: 0, max: 1, defaultValue: 0.7 },
       { key: 'max_tokens', label: 'Max Tokens', type: 'number', step: 1, min: 1, max: 200000, defaultValue: 4096, integer: true },
+    ],
+    "opencode-go": [
+      { key: 'temperature', label: 'Temperature', type: 'number', step: 0.1, min: 0, max: 2, defaultValue: 0.7 },
+      { key: 'max_tokens', label: 'Max Tokens', type: 'number', step: 1, min: 1, max: 131072, defaultValue: 4096, integer: true },
+      { key: 'top_p', label: 'Top P', type: 'number', step: 0.05, min: 0, max: 1, defaultValue: 0.9 },
     ],
   };
 

@@ -424,6 +424,15 @@ $(document).ready(function () {
     var $label = $('#engine-status');
     $dot.removeClass('bg-green-500 bg-red-500 bg-yellow-500').addClass('bg-yellow-500');
     $label.text('Checking...');
+    if (provider.type === "opencode-go") {
+      if (provider.apiKey) {
+        $dot.removeClass('bg-yellow-500 bg-red-500').addClass('bg-green-500');
+        $label.text(provider.name + ' Ready');
+      } else {
+        $label.text(provider.name + ' API Key Required');
+      }
+      return;
+    }
     try {
       var baseUrl = provider.baseUrl.replace(/\/+$/, '');
       var opts = { method: 'HEAD', signal: AbortSignal.timeout(5000) };
